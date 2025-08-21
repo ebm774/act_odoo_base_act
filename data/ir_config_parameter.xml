@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- LDAP Configuration Parameters -->
+        <record id="ldap_enabled" model="ir.config_parameter">
+            <field name="key">base_act.ldap_enabled</field>
+            <field name="value">False</field>
+        </record>
+
+        <record id="ldap_server_cloud" model="ir.config_parameter">
+            <field name="key">base_act.ldap_server_cloud</field>
+            <field name="value">ldap://cloud.autocontrole.be:389</field>
+        </record>
+
+        <record id="ldap_server_local" model="ir.config_parameter">
+            <field name="key">base_act.ldap_server_local</field>
+            <field name="value">ldap://local.autocontrole.be:389</field>
+        </record>
+
+        <record id="ldap_bind_dn" model="ir.config_parameter">
+            <field name="key">base_act.ldap_bind_dn</field>
+            <field name="value">CN=service_odoo,CN=Users,DC=autocontrole,DC=be</field>
+        </record>
+
+        <record id="ldap_base_dn" model="ir.config_parameter">
+            <field name="key">base_act.ldap_base_dn</field>
+            <field name="value">DC=autocontrole,DC=be</field>
+        </record>
+    </data>
+</odoo>
