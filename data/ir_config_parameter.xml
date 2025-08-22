@@ -7,11 +7,6 @@
             <field name="value">False</field>
         </record>
 
-        <record id="ldap_server_cloud" model="ir.config_parameter">
-            <field name="key">base_act.ldap_server_cloud</field>
-            <field name="value">ldap://cloud.autocontrole.be:389</field>
-        </record>
-
         <record id="ldap_server_local" model="ir.config_parameter">
             <field name="key">base_act.ldap_server_local</field>
             <field name="value">ldap://local.autocontrole.be:389</field>

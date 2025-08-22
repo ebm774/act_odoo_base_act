@@ -19,7 +19,6 @@ class LDAPConnector(models.AbstractModel):
         """Get LDAP configuration from system parameters"""
         ICP = self.env['ir.config_parameter'].sudo()
         return {
-            'server_cloud': ICP.get_param('base_act.ldap_server_cloud', ''),
             'server_local': ICP.get_param('base_act.ldap_server_local', ''),
             'bind_dn': ICP.get_param('base_act.ldap_bind_dn', ''),
             'bind_password': ICP.get_param('base_act.ldap_bind_password', ''),
@@ -29,8 +28,7 @@ class LDAPConnector(models.AbstractModel):
 
     @contextmanager
     def ldap_connection(self, bind_dn=None, bind_password=None):
-        """Context manager for LDAP connections
-        Try cloud first, then local"""
+        """Context manager for LDAP connections"""
         config = self.get_ldap_config()
         conn = None
 
@@ -40,8 +38,6 @@ class LDAPConnector(models.AbstractModel):
             bind_password = config['bind_password']
 
         servers = []
-        if config['server_cloud']:
-            servers.append(config['server_cloud'])
         if config['server_local']:
             servers.append(config['server_local'])
 
