@@ -6,6 +6,7 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
+
 class LDAPUsers(models.AbstractModel):
     """Mixin to add LDAP authentication to res.users
     Modules that need LDAP auth should make res.users inherit this"""
@@ -19,39 +20,15 @@ class LDAPUsers(models.AbstractModel):
     badge_number = fields.Char('Badge Number')  # For storing badge from mail field
 
     @classmethod
-    def _login(cls, db, login, password):
-        """Override login to check LDAP first"""
-        user_id = False
 
-        try:
-            # Check if LDAP is enabled
-            with cls.pool.cursor() as cr:
-                env = api.Environment(cr, SUPERUSER_ID, {})
-                ICP = env['ir.config_parameter'].sudo()
-                ldap_enabled = ICP.get_param('base_act.ldap_enabled', 'False') == 'True'
-
-                if ldap_enabled:
-                    # Try LDAP authentication
-                    connector = env['base_act.ldap.connector']
-                    ldap_attrs = connector.authenticate_user(login, password)
-
-                    if ldap_attrs:
-                        # Sync user data
-                        Users = env['res.users']
-                        user_id = Users._sync_ldap_user(ldap_attrs, login)
-                        cr.commit()  # Commit the user creation/update
-
-        except Exception as e:
-            _logger.error(f"LDAP authentication error: {str(e)}")
-
-        # Fallback to standard authentication if LDAP fails or is disabled
-        if not user_id:
-            user_id = super()._login(db, login, password)
-
-        return user_id
 
     def _sync_ldap_user(self, ldap_attrs, login):
         """Sync user data from LDAP attributes"""
+
+        _logger.info("##############################")
+        _logger.info("_sync_ldap_user")
+        _logger.info("##############################")
+
 
         # Helper to extract attributes
         def get_attr(attrs, key, default=''):
@@ -92,6 +69,13 @@ class LDAPUsers(models.AbstractModel):
         return user.id
 
     def _sync_user_groups(self, user, member_of_list):
+
+        _logger.info("##############################")
+        _logger.info("_login")
+        _logger.info("##############################")
+
+
+
         """Sync user groups from LDAP"""
         # Get odoo groups from LDAP
         connector = self.env['base_act.ldap.connector']

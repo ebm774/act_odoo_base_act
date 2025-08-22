@@ -6,9 +6,6 @@ from contextlib import contextmanager
 
 _logger = logging.getLogger(__name__)
 
-_logger.info("##############################")
-_logger.info("")
-_logger.info("##############################")
 
 
 class LDAPConnector(models.AbstractModel):
@@ -23,7 +20,7 @@ class LDAPConnector(models.AbstractModel):
         """Get LDAP configuration from system parameters"""
 
         _logger.info("##############################")
-        _logger.info("")
+        _logger.info("get_ldap_config")
         _logger.info("##############################")
 
         ICP = self.env['ir.config_parameter'].sudo()
@@ -36,14 +33,9 @@ class LDAPConnector(models.AbstractModel):
         }
 
     @contextmanager
+    @contextmanager
     def ldap_connection(self, bind_dn=None, bind_password=None):
         """Context manager for LDAP connections"""
-
-        _logger.info("##############################")
-        _logger.info("ldap_connection")
-        _logger.info("##############################")
-
-
         config = self.get_ldap_config()
         conn = None
 
@@ -53,32 +45,44 @@ class LDAPConnector(models.AbstractModel):
             bind_password = config['bind_password']
 
         servers = []
-        if config['server_local']:
+        if config.get('server_local'):
             servers.append(config['server_local'])
 
         last_error = None
         for server in servers:
             try:
+                _logger.info(f"[LDAP] Attempting connection to: {server}")
+                _logger.info(f"[LDAP] Using bind DN: {bind_dn}")
+
                 conn = ldap.initialize(server)
                 conn.set_option(ldap.OPT_REFERRALS, 0)
                 conn.set_option(ldap.OPT_NETWORK_TIMEOUT, config['timeout'])
+
+                # Try simple bind
+                conn.protocol_version = ldap.VERSION3
                 conn.simple_bind_s(bind_dn, bind_password)
-                _logger.debug(f"Connected to LDAP server: {server}")
+
+                _logger.info(f"[LDAP] Successfully connected to {server}")
                 yield conn
                 return
+
+            except ldap.INVALID_CREDENTIALS as e:
+                last_error = e
+                _logger.error(f"[LDAP] Invalid credentials for {bind_dn}: {e}")
+
             except Exception as e:
                 last_error = e
-                _logger.warning(f"Failed to connect to {server}: {str(e)}")
+                _logger.error(f"[LDAP] Failed to connect to {server}: {str(e)}")
+
+            finally:
                 if conn:
                     try:
                         conn.unbind()
                     except:
                         pass
-                continue
 
         # If we get here, all servers failed
         raise Exception(f"Could not connect to any LDAP server. Last error: {last_error}")
-
     @api.model
     def search_user(self, login):
         """Search for a user in LDAP by login (sAMAccountName)"""
