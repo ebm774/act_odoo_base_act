@@ -6,6 +6,10 @@ from contextlib import contextmanager
 
 _logger = logging.getLogger(__name__)
 
+_logger.info("##############################")
+_logger.info("")
+_logger.info("##############################")
+
 
 class LDAPConnector(models.AbstractModel):
     """Abstract model providing LDAP connection functionality
@@ -17,6 +21,11 @@ class LDAPConnector(models.AbstractModel):
     @api.model
     def get_ldap_config(self):
         """Get LDAP configuration from system parameters"""
+
+        _logger.info("##############################")
+        _logger.info("")
+        _logger.info("##############################")
+
         ICP = self.env['ir.config_parameter'].sudo()
         return {
             'server_local': ICP.get_param('base_act.ldap_server_local', ''),
@@ -29,6 +38,12 @@ class LDAPConnector(models.AbstractModel):
     @contextmanager
     def ldap_connection(self, bind_dn=None, bind_password=None):
         """Context manager for LDAP connections"""
+
+        _logger.info("##############################")
+        _logger.info("ldap_connection")
+        _logger.info("##############################")
+
+
         config = self.get_ldap_config()
         conn = None
 
@@ -67,6 +82,11 @@ class LDAPConnector(models.AbstractModel):
     @api.model
     def search_user(self, login):
         """Search for a user in LDAP by login (sAMAccountName)"""
+
+        _logger.info("##############################")
+        _logger.info("search_user")
+        _logger.info("##############################")
+
         config = self.get_ldap_config()
 
         with self.ldap_connection() as conn:
@@ -86,6 +106,12 @@ class LDAPConnector(models.AbstractModel):
     @api.model
     def authenticate_user(self, login, password):
         """Authenticate a user against LDAP"""
+
+        _logger.info("##############################")
+        _logger.info("authenticate_user")
+        _logger.info("##############################")
+
+
         user_data = self.search_user(login)
         if not user_data:
             return False
@@ -105,6 +131,12 @@ class LDAPConnector(models.AbstractModel):
     @api.model
     def get_odoo_groups_from_ldap(self, member_of_list):
         """Extract Odoo group names from LDAP memberOf attribute"""
+
+        _logger.info("##############################")
+        _logger.info("get_odoo_groups_from_ldap")
+        _logger.info("##############################")
+
+
         odoo_groups = []
         for group_dn in member_of_list:
             if isinstance(group_dn, bytes):
