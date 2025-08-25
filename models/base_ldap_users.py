@@ -18,7 +18,8 @@ class LDAPUsers(models.AbstractModel):
     ldap_uid = fields.Char('LDAP UID', readonly=True)
     is_ldap_user = fields.Boolean('LDAP User', default=False)
     badge_number = fields.Integer('Badge Number')  # For storing badge from mail field
-    worker_id = fields.Integer('Badge Number')
+    worker_id = fields.Integer('Worker Number')
+    email = fields.Char('Email')
 
 
 
@@ -43,8 +44,8 @@ class LDAPUsers(models.AbstractModel):
 
         # Extract user data, use the LDAP display name
         display_name = get_attr(ldap_attrs, 'displayName')
-        badge_number = get_attr(ldap_attrs, 'mail')
-        worker_id = get_attr(ldap_attrs, 'telephoneNumber')
+        badge_number = get_attr(ldap_attrs, 'employeeID')
+        worker_id = get_attr(ldap_attrs, 'employeeNumber')
         email = get_attr(ldap_attrs, 'userPrincipalName')
         member_of = ldap_attrs.get('memberOf', [])
 

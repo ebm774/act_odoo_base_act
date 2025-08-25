@@ -33,7 +33,7 @@
         'security/ir.model.access.csv',
 
         # Data
-        'data/ir_config_parameter.xml',
+
 
 
     ],

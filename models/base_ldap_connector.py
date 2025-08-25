@@ -101,7 +101,7 @@ class LDAPConnector(models.AbstractModel):
                 config['base_dn'],
                 ldap.SCOPE_SUBTREE,
                 search_filter,
-                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName']
+                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName', 'employeeID', 'EmployeeNumber']
             )
 
             if result and result[0][1]:
