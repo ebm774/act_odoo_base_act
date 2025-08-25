@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, api, tools
 import ldap
+import ldap.filter
 import logging
 from contextlib import contextmanager
 
@@ -33,11 +34,11 @@ class LDAPConnector(models.AbstractModel):
         }
 
     @contextmanager
-    @contextmanager
     def ldap_connection(self, bind_dn=None, bind_password=None):
         """Context manager for LDAP connections"""
         config = self.get_ldap_config()
         conn = None
+        ##
 
         # If no specific bind credentials, use service account
         if not bind_dn:

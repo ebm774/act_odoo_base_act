@@ -19,6 +19,8 @@ class LDAPUsers(models.AbstractModel):
     is_ldap_user = fields.Boolean('LDAP User', default=False)
     badge_number = fields.Char('Badge Number')  # For storing badge from mail field
 
+
+
     @classmethod
 
 
@@ -42,7 +44,8 @@ class LDAPUsers(models.AbstractModel):
         member_of = ldap_attrs.get('memberOf', [])
 
         # Find or create user
-        user = self.search([('login', '=', login)], limit=1)
+        Users = self.env['res.users']
+        user = Users.search([('login', '=', login)], limit=1)
 
         user_vals = {
             'name': display_name or login,
@@ -56,7 +59,7 @@ class LDAPUsers(models.AbstractModel):
         if not user:
             # Create new user
             user_vals['groups_id'] = [(6, 0, [self.env.ref('base.group_user').id])]
-            user = self.create(user_vals)
+            user = Users.create(user_vals)
             _logger.info(f"Created new LDAP user: {login}")
         else:
             # Update existing user

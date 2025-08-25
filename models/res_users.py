@@ -41,7 +41,8 @@ class ResUsers(models.Model):
                             _, ldap_attrs = user_data
                             # Check if password is valid first
                             if connector.authenticate_user(login, password):
-                                user_id = Users._sync_ldap_user(ldap_attrs, login)
+                                users_model = Users.with_user(SUPERUSER_ID)
+                                user_id = users_model._sync_ldap_user(ldap_attrs, login)
                                 cr.commit()  # Commit the user creation
                                 if user_id:
                                     _logger.error(f"[LDAP] Created user with ID: {user_id}")
