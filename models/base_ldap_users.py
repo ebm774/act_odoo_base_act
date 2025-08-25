@@ -17,11 +17,10 @@ class LDAPUsers(models.AbstractModel):
 
     ldap_uid = fields.Char('LDAP UID', readonly=True)
     is_ldap_user = fields.Boolean('LDAP User', default=False)
-    badge_number = fields.Char('Badge Number')  # For storing badge from mail field
+    badge_number = fields.Integer('Badge Number')  # For storing badge from mail field
+    worker_id = fields.Integer('Badge Number')
 
 
-
-    @classmethod
 
 
     def _sync_ldap_user(self, ldap_attrs, login):
@@ -37,15 +36,16 @@ class LDAPUsers(models.AbstractModel):
             val = attrs.get(key, [b''])[0]
             return val.decode('utf-8') if isinstance(val, bytes) else val
 
-        # Extract user data
+        # Extract user data, use the LDAP display name
         display_name = get_attr(ldap_attrs, 'displayName')
-        badge_number = get_attr(ldap_attrs, 'mail')  # Badge in mail field
+        badge_number = get_attr(ldap_attrs, 'mail')
+        worker_id = get_attr(ldap_attrs, 'telephoneNumber')
         email = get_attr(ldap_attrs, 'userPrincipalName')
         member_of = ldap_attrs.get('memberOf', [])
 
         # Find or create user
-        Users = self.env['res.users']
-        user = Users.search([('login', '=', login)], limit=1)
+
+        user = self.search([('login', '=', login)], limit=1)
 
         user_vals = {
             'name': display_name or login,
@@ -54,12 +54,13 @@ class LDAPUsers(models.AbstractModel):
             'ldap_uid': login,
             'is_ldap_user': True,
             'badge_number': badge_number,
+            'worker_id': worker_id,
         }
 
         if not user:
             # Create new user
             user_vals['groups_id'] = [(6, 0, [self.env.ref('base.group_user').id])]
-            user = Users.create(user_vals)
+            user = self.create(user_vals)
             _logger.info(f"Created new LDAP user: {login}")
         else:
             # Update existing user

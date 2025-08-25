@@ -46,6 +46,26 @@ class ResUsers(models.Model):
                                 cr.commit()  # Commit the user creation
                                 if user_id:
                                     _logger.error(f"[LDAP] Created user with ID: {user_id}")
+
+                    # If user exists and is LDAP user, try LDAP authentication
+                    elif user and user.is_ldap_user:
+                        connector = env['base_act.ldap.connector']
+                        if connector.authenticate_user(login, password):
+                            _logger.error(f"[LDAP] Existing LDAP user authenticated successfully")
+                            # Sync user data from LDAP
+                            user_data = connector.search_user(login)
+                            if user_data:
+                                _, ldap_attrs = user_data
+                                user._sync_ldap_user(ldap_attrs, login)
+
+                            return {
+                                'uid': user.id,
+                                'auth_method': 'ldap',
+                                'mfa': 'default'
+                            }
+                        else:
+                            _logger.error(f"[LDAP] LDAP authentication failed for existing user")
+
                 except Exception as e:
                     _logger.error(f"[LDAP] Error during user lookup/creation: {e}")
                     import traceback
@@ -64,9 +84,17 @@ class ResUsers(models.Model):
 
         if ldap_enabled and self.is_ldap_user:
             _logger.error(f"[LDAP] User {self.login} is LDAP user, checking LDAP")
+
+            actual_password = password
+            if isinstance(password, dict):
+                actual_password = password.get('password', '')
+                _logger.error(f"[LDAP] Extracted password from dict")
+
+            _logger.error(f"[LDAP] Password type: {type(actual_password)}")
+
             try:
                 connector = self.env['base_act.ldap.connector']
-                ldap_attrs = connector.authenticate_user(self.login, password)
+                ldap_attrs = connector.authenticate_user(self.login, actual_password)
                 if ldap_attrs:
                     _logger.error(f"[LDAP] LDAP authentication successful")
                     # Update user data from LDAP

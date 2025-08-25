@@ -125,6 +125,8 @@ class LDAPConnector(models.AbstractModel):
 
         # Try to bind with user credentials
         try:
+
+
             with self.ldap_connection(bind_dn=dn, bind_password=password):
                 return attrs  # Return user attributes on success
         except ldap.INVALID_CREDENTIALS:
