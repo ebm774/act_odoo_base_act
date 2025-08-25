@@ -46,6 +46,11 @@ class ResUsers(models.Model):
                                 cr.commit()  # Commit the user creation
                                 if user_id:
                                     _logger.error(f"[LDAP] Created user with ID: {user_id}")
+                                    return {
+                                        'uid': user_id,
+                                        'auth_method': 'ldap',
+                                        'mfa': 'default'
+                                    }
 
                     # If user exists and is LDAP user, try LDAP authentication
                     elif user and user.is_ldap_user:
@@ -65,6 +70,8 @@ class ResUsers(models.Model):
                             }
                         else:
                             _logger.error(f"[LDAP] LDAP authentication failed for existing user")
+                            from odoo.exceptions import AccessDenied
+                            raise AccessDenied("Invalid LDAP credentials")
 
                 except Exception as e:
                     _logger.error(f"[LDAP] Error during user lookup/creation: {e}")

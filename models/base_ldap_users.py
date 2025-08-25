@@ -33,8 +33,13 @@ class LDAPUsers(models.AbstractModel):
 
         # Helper to extract attributes
         def get_attr(attrs, key, default=''):
-            val = attrs.get(key, [b''])[0]
-            return val.decode('utf-8') if isinstance(val, bytes) else val
+            # when user dont exist, the LDAP return a list, we can't extract attributes properly
+            if isinstance(attrs, list):
+                return default
+
+
+            val = attrs.get(key, [b''])[0] if attrs.get(key) else b''
+            return val.decode('utf-8') if isinstance(val, bytes) else default
 
         # Extract user data, use the LDAP display name
         display_name = get_attr(ldap_attrs, 'displayName')
