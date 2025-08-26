@@ -27,17 +27,12 @@ class LoginController(Home):
                 connector = request.env['base_act.ldap.connector'].sudo()
                 matching_users = connector.search_users_by_tag(tag_number)
 
+
                 if len(matching_users) == 1:
                     # Single user found - authenticate directly
                     dn, attrs = matching_users[0]
-                    login = attrs.get('SamAccountName', [b''])[0]
-                    if isinstance(login, bytes):
-                        login = login.decode('utf-8')
 
-                        _logger.info("#######################")
-                        _logger.info("one tag user")
-                        _logger.info("#######################")
-
+                    login = attrs.get('sAMAccountName', [b''])[0].decode('utf-8')
                     # Auto-login with tag (create session without password)
                     return self._process_tag_login(login, attrs, redirect)
 
@@ -106,8 +101,12 @@ class LoginController(Home):
 
         try:
             # Create or get user
-            Users = request.env['res.users'].sudo()
-            user = Users.search([('login', '=', login)], limit=1)
+            users = request.env['res.users'].sudo()
+            user = request.env['res.users'].sudo().search([('login', '=', login)], limit=1)
+
+            _logger.info("#######################")
+            _logger.info("login : " + login)
+            _logger.info("#######################")
 
             if not user:
 
@@ -118,15 +117,17 @@ class LoginController(Home):
                 company = request.env.company or request.env['res.company'].sudo().search([], limit=1)
 
                 # Create user from LDAP
-                user_id = Users.with_company(company)._sync_ldap_user(ldap_attrs, login)
+                user_id = users.with_company(company)._sync_ldap_user(ldap_attrs, login)
                 if not user_id:
                     raise ValueError("Failed to create user")
-                user = Users.browse(user_id)
+                user = users.browse(user_id)
 
             else:
 
                 _logger.info("#######################")
                 _logger.info("else")
+                for ldap_attr in ldap_attrs:
+                    _logger.info(ldap_attr)
                 _logger.info("#######################")
 
                 # Update existing user
@@ -154,7 +155,12 @@ class LoginController(Home):
             _logger.info("#######################")
 
             # Authenticate using the token as password
-            request.session.authenticate(request.db, login, token)
+            request.session.authenticate(request.db, {
+                'login': login,
+                'password': token,
+                'type': 'password'
+            })
+
             _logger.info("#######################")
             _logger.info("session authenticate done")
             _logger.info("#######################")

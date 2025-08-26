@@ -39,13 +39,14 @@ class LDAPUsers(models.AbstractModel):
         badge_number = get_attr(ldap_attrs, 'employeeID')
         worker_id = get_attr(ldap_attrs, 'employeeNumber')
         email = get_attr(ldap_attrs, 'userPrincipalName')
+        ldap_login = get_attr(ldap_attrs, 'sAMAccountName')
         member_of = ldap_attrs.get('memberOf', [])
 
-        # IMPORTANT: login should come from LDAP sAMAccountName, not the parameter
-        ldap_login = get_attr(ldap_attrs, 'sAMAccountName')
+        # Use the login from LDAP if available, otherwise use the passed login
         if not ldap_login:
-            _logger.error(f"No sAMAccountName found in LDAP attributes for {login}")
-            ldap_login = login  # Fallback to passed login
+            ldap_login = login
+
+
 
         # Find existing user
         user = self.search([('login', '=', ldap_login)], limit=1)
@@ -73,7 +74,9 @@ class LDAPUsers(models.AbstractModel):
             user_vals['groups_id'] = [(6, 0, [self.env.ref('base.group_user').id])]
 
             try:
-                user = self.sudo().create(user_vals)  # Use sudo() to ensure permissions
+                # Create using the res.users model, not self
+                user = self.sudo().create(user_vals)
+
                 _logger.info(f"Created new LDAP user: {ldap_login} with ID: {user.id}")
                 return user.id
             except Exception as e:
@@ -82,12 +85,13 @@ class LDAPUsers(models.AbstractModel):
         else:
             _logger.info(f"Updating existing user {ldap_login}")
             try:
-                user.sudo().write(user_vals)  # Use sudo() for write as well
+                user.write(user_vals)
                 _logger.info(f"Updated LDAP user: {ldap_login}")
                 return user.id
             except Exception as e:
                 _logger.error(f"Failed to update user {ldap_login}: {e}")
-                return user.id  # Return existing user ID even if update fails
+                return user.id
+
     def _sync_user_groups(self, user, member_of_list):
 
         _logger.info("##############################")

@@ -12,6 +12,9 @@ class ResUsers(models.Model):
     _name = 'res.users'
     _inherit = ['res.users', 'base_act.ldap.users']
 
+    tag_auth_token = fields.Char('Tag Auth Token', copy=False)
+    tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
+
     @classmethod
     def authenticate(cls, db, credential, user_agent_env):
         """Override authenticate - this is a classmethod!"""
@@ -21,8 +24,6 @@ class ResUsers(models.Model):
 
         _logger.error(f"[LDAP] Authenticate called for: {login}")
 
-        tag_auth_token = fields.Char('Tag Auth Token', copy=False)
-        tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
 
         # Handle tag authentication (no password required)
         if tag_auth:
@@ -104,11 +105,24 @@ class ResUsers(models.Model):
         """Check credentials - try LDAP first for LDAP users"""
         _logger.error(f"[LDAP] _check_credentials for user: {self.login}, is_ldap: {self.is_ldap_user}")
 
+        _logger.error("################################")
+        _logger.error(f"[DEBUG] Tag token: {self.tag_auth_token}")
+        _logger.error(f"[DEBUG] Tag expiry: {self.tag_auth_expiry}")
+        _logger.error(f"[DEBUG] Password received: {password}")
+        _logger.error(f"[DEBUG] Password type: {type(password)}")
+
+
         # Check tag authentication token first
         if self.tag_auth_token and self.tag_auth_expiry:
+            _logger.error(f"[DEBUG] Checking token validity...")
             if fields.Datetime.now() <= self.tag_auth_expiry and password == self.tag_auth_token:
                 _logger.info(f"[AUTH] Tag token authentication successful for {self.login}")
-                return  # S
+                return
+            else:
+                _logger.error(f"[DEBUG] Token validation failed - expired or mismatch")
+        else:
+            _logger.error(f"[DEBUG] No tag auth token set")
+        _logger.error("################################")
 
         # Check if LDAP is enabled
         ICP = self.env['ir.config_parameter'].sudo()
