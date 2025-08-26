@@ -101,9 +101,14 @@ class LoginController(Home):
             user = Users.search([('login', '=', login)], limit=1)
 
             if not user:
+                company = request.env.company or request.env['res.company'].sudo().search([], limit=1)
+
                 # Create user from LDAP
-                user_id = Users._sync_ldap_user(ldap_attrs, login)
+                user_id = Users.with_company(company)._sync_ldap_user(ldap_attrs, login)
+                if not user_id:
+                    raise ValueError("Failed to create user")
                 user = Users.browse(user_id)
+
             else:
                 # Update existing user
                 user._sync_ldap_user(ldap_attrs, login)
@@ -114,6 +119,8 @@ class LoginController(Home):
                 'tag_auth_token': token,
                 'tag_auth_expiry': fields.Datetime.now() + datetime.timedelta(seconds=30)
             })
+
+            request.env.cr.commit()
 
             # Authenticate using the token as password
             request.session.authenticate(request.db, login, token)
@@ -128,6 +135,7 @@ class LoginController(Home):
 
         except Exception as e:
             _logger.error(f"Tag login error: {e}")
+            request.env.cr.rollback()
             values = request.params.copy()
-            values['error'] = _("Authentication failed")
+            values['error'] = _("Authentication failed: Unable to create or access user account")
             return request.render('web.login', values)

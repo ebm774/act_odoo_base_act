@@ -53,14 +53,19 @@ class LDAPUsers(models.AbstractModel):
 
         user = self.search([('login', '=', login)], limit=1)
 
+        # Get the default company
+        company = self.env.company or self.env['res.company'].sudo().search([], limit=1)
+
         user_vals = {
             'name': display_name or login,
             'login': login,
             'email': email,
             'ldap_uid': login,
             'is_ldap_user': True,
-            'badge_number': badge_number,
-            'worker_id': worker_id,
+            'badge_number': int(badge_number) if badge_number and badge_number.isdigit() else 0,
+            'worker_id': int(worker_id) if worker_id and worker_id.isdigit() else 0,
+            'company_id': company.id,  #
+            'company_ids': [(4, company.id)],
         }
 
         if not user:
