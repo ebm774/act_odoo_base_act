@@ -21,68 +21,73 @@ class LDAPUsers(models.AbstractModel):
     worker_id = fields.Integer('Worker Number')
     email = fields.Char('Email')
 
-
-
-
     def _sync_ldap_user(self, ldap_attrs, login):
         """Sync user data from LDAP attributes"""
-
         _logger.info("##############################")
         _logger.info("_sync_ldap_user")
         _logger.info("##############################")
 
-
         # Helper to extract attributes
         def get_attr(attrs, key, default=''):
-            # when user dont exist, the LDAP return a list, we can't extract attributes properly
             if isinstance(attrs, list):
                 return default
-
-
             val = attrs.get(key, [b''])[0] if attrs.get(key) else b''
             return val.decode('utf-8') if isinstance(val, bytes) else default
 
-        # Extract user data, use the LDAP display name
+        # Extract user data
         display_name = get_attr(ldap_attrs, 'displayName')
         badge_number = get_attr(ldap_attrs, 'employeeID')
         worker_id = get_attr(ldap_attrs, 'employeeNumber')
         email = get_attr(ldap_attrs, 'userPrincipalName')
         member_of = ldap_attrs.get('memberOf', [])
 
-        # Find or create user
+        # IMPORTANT: login should come from LDAP sAMAccountName, not the parameter
+        ldap_login = get_attr(ldap_attrs, 'sAMAccountName')
+        if not ldap_login:
+            _logger.error(f"No sAMAccountName found in LDAP attributes for {login}")
+            ldap_login = login  # Fallback to passed login
 
-        user = self.search([('login', '=', login)], limit=1)
+        # Find existing user
+        user = self.search([('login', '=', ldap_login)], limit=1)
 
         # Get the default company
         company = self.env.company or self.env['res.company'].sudo().search([], limit=1)
 
         user_vals = {
-            'name': display_name or login,
-            'login': login,
+            'name': display_name or ldap_login,
+            'login': ldap_login,
             'email': email,
-            'ldap_uid': login,
+            'ldap_uid': ldap_login,
             'is_ldap_user': True,
             'badge_number': int(badge_number) if badge_number and badge_number.isdigit() else 0,
             'worker_id': int(worker_id) if worker_id and worker_id.isdigit() else 0,
-            'company_id': company.id,  #
+            'company_id': company.id,
             'company_ids': [(4, company.id)],
         }
 
+        _logger.info(f"User values prepared for {ldap_login}")
+
         if not user:
-            # Create new user
+            _logger.info(f"Creating new user for {ldap_login}")
+            # Add default group for new users
             user_vals['groups_id'] = [(6, 0, [self.env.ref('base.group_user').id])]
-            user = self.create(user_vals)
-            _logger.info(f"Created new LDAP user: {login}")
+
+            try:
+                user = self.sudo().create(user_vals)  # Use sudo() to ensure permissions
+                _logger.info(f"Created new LDAP user: {ldap_login} with ID: {user.id}")
+                return user.id
+            except Exception as e:
+                _logger.error(f"Failed to create user {ldap_login}: {e}")
+                return False
         else:
-            # Update existing user
-            user.write(user_vals)
-            _logger.debug(f"Updated LDAP user: {login}")
-
-        # Sync groups
-        self._sync_user_groups(user, member_of)
-
-        return user.id
-
+            _logger.info(f"Updating existing user {ldap_login}")
+            try:
+                user.sudo().write(user_vals)  # Use sudo() for write as well
+                _logger.info(f"Updated LDAP user: {ldap_login}")
+                return user.id
+            except Exception as e:
+                _logger.error(f"Failed to update user {ldap_login}: {e}")
+                return user.id  # Return existing user ID even if update fails
     def _sync_user_groups(self, user, member_of_list):
 
         _logger.info("##############################")

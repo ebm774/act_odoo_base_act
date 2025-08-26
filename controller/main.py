@@ -30,9 +30,13 @@ class LoginController(Home):
                 if len(matching_users) == 1:
                     # Single user found - authenticate directly
                     dn, attrs = matching_users[0]
-                    login = attrs.get('sAMAccountName', [b''])[0]
+                    login = attrs.get('SamAccountName', [b''])[0]
                     if isinstance(login, bytes):
                         login = login.decode('utf-8')
+
+                        _logger.info("#######################")
+                        _logger.info("one tag user")
+                        _logger.info("#######################")
 
                     # Auto-login with tag (create session without password)
                     return self._process_tag_login(login, attrs, redirect)
@@ -45,7 +49,7 @@ class LoginController(Home):
                         if isinstance(display_name, bytes):
                             display_name = display_name.decode('utf-8')
 
-                        login = attrs.get('sAMAccountName', [b''])[0]
+                        login = attrs.get('SamAccountName', [b''])[0]
                         if isinstance(login, bytes):
                             login = login.decode('utf-8')
 
@@ -95,12 +99,22 @@ class LoginController(Home):
 
     def _process_tag_login(self, login, ldap_attrs, redirect=None):
         """Process login for tag-authenticated user"""
+
+        _logger.info("#######################")
+        _logger.info("_process_tag_login")
+        _logger.info("#######################")
+
         try:
             # Create or get user
             Users = request.env['res.users'].sudo()
             user = Users.search([('login', '=', login)], limit=1)
 
             if not user:
+
+                _logger.info("#######################")
+                _logger.info("not user")
+                _logger.info("#######################")
+
                 company = request.env.company or request.env['res.company'].sudo().search([], limit=1)
 
                 # Create user from LDAP
@@ -110,8 +124,17 @@ class LoginController(Home):
                 user = Users.browse(user_id)
 
             else:
+
+                _logger.info("#######################")
+                _logger.info("else")
+                _logger.info("#######################")
+
                 # Update existing user
                 user._sync_ldap_user(ldap_attrs, login)
+
+            _logger.info("#######################")
+            _logger.info("prout")
+            _logger.info("#######################")
 
             # Generate temporary token for tag authentication
             token = secrets.token_urlsafe(32)
@@ -120,16 +143,31 @@ class LoginController(Home):
                 'tag_auth_expiry': fields.Datetime.now() + datetime.timedelta(seconds=30)
             })
 
+            _logger.info("#######################")
+            _logger.info("user.write done")
+            _logger.info("#######################")
+
+
             request.env.cr.commit()
+            _logger.info("#######################")
+            _logger.info("cr commit done")
+            _logger.info("#######################")
 
             # Authenticate using the token as password
             request.session.authenticate(request.db, login, token)
+            _logger.info("#######################")
+            _logger.info("session authenticate done")
+            _logger.info("#######################")
 
             # Clear the token after use
             user.write({
                 'tag_auth_token': False,
                 'tag_auth_expiry': False
             })
+
+            _logger.info("#######################")
+            _logger.info("user.write to clear token done")
+            _logger.info("#######################")
 
             return request.redirect(redirect or '/web')
 
