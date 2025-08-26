@@ -32,7 +32,8 @@
         # Security
         'security/ir.model.access.csv',
 
-        # Data
+        # Controller
+        'views/login_templates.xml'
 
 
 

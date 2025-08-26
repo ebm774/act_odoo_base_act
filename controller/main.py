@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-from odoo import http, _
+
+from odoo import http, _, fields
 from odoo.http import request
 from odoo.addons.web.controllers.home import Home
+import datetime
 import json
 import logging
+import secrets
+
 
 _logger = logging.getLogger(__name__)
 
@@ -47,18 +51,24 @@ class LoginController(Home):
 
                         users_list.append({
                             'login': login,
-                            'display_name': display_name
+                            'display_name': display_name or login
                         })
 
-                    # Store in session for selection
+                    # Store in session
                     request.session['tag_users'] = users_list
                     request.session['tag_number'] = tag_number
                     request.session['redirect'] = redirect
 
-                    values = request.params.copy()
-                    values['tag_users'] = users_list
-                    values['error'] = False
-                    return request.render('base_act.select_user', values)
+                    # Use a simpler rendering approach
+                    response = request.make_response(request.env['ir.ui.view']._render_template(
+                        'base_act.select_user',
+                        {
+                            'tag_users': users_list,
+                            'csrf_token': request.csrf_token(),
+                        }
+                    ))
+                    return response
+
                 else:
                     # No user found
                     values = request.params.copy()
@@ -82,27 +92,39 @@ class LoginController(Home):
         response = super().web_login(redirect, **kw)
         return response
 
+
     def _process_tag_login(self, login, ldap_attrs, redirect=None):
         """Process login for tag-authenticated user"""
         try:
             # Create or get user
-            with request.env.cr.savepoint():
-                Users = request.env['res.users'].sudo()
-                user = Users.search([('login', '=', login)], limit=1)
+            Users = request.env['res.users'].sudo()
+            user = Users.search([('login', '=', login)], limit=1)
 
-                if not user:
-                    # Create user from LDAP
-                    user_id = Users._sync_ldap_user(ldap_attrs, login)
-                    user = Users.browse(user_id)
-                else:
-                    # Update existing user
-                    user._sync_ldap_user(ldap_attrs, login)
+            if not user:
+                # Create user from LDAP
+                user_id = Users._sync_ldap_user(ldap_attrs, login)
+                user = Users.browse(user_id)
+            else:
+                # Update existing user
+                user._sync_ldap_user(ldap_attrs, login)
 
-                # Create session
-                request.session.authenticate(request.db, login, '')
-                request.session['tag_authenticated'] = True
+            # Generate temporary token for tag authentication
+            token = secrets.token_urlsafe(32)
+            user.write({
+                'tag_auth_token': token,
+                'tag_auth_expiry': fields.Datetime.now() + datetime.timedelta(seconds=30)
+            })
 
-                return request.redirect(redirect or '/web')
+            # Authenticate using the token as password
+            request.session.authenticate(request.db, login, token)
+
+            # Clear the token after use
+            user.write({
+                'tag_auth_token': False,
+                'tag_auth_expiry': False
+            })
+
+            return request.redirect(redirect or '/web')
 
         except Exception as e:
             _logger.error(f"Tag login error: {e}")

@@ -84,6 +84,7 @@ class LDAPConnector(models.AbstractModel):
 
         # If we get here, all servers failed
         raise Exception(f"Could not connect to any LDAP server. Last error: {last_error}")
+
     @api.model
     def search_user(self, login):
         """Search for a user in LDAP by login (sAMAccountName)"""
@@ -126,7 +127,6 @@ class LDAPConnector(models.AbstractModel):
         # Try to bind with user credentials
         try:
 
-
             with self.ldap_connection(bind_dn=dn, bind_password=password):
                 return attrs  # Return user attributes on success
         except ldap.INVALID_CREDENTIALS:
@@ -134,6 +134,57 @@ class LDAPConnector(models.AbstractModel):
         except Exception as e:
             _logger.error(f"LDAP authentication error for {login}: {str(e)}")
             return False
+
+    @api.model
+    def search_users_by_tag(self, tag_number):
+        """Search for users by tag number (stored in mail attribute)"""
+        _logger.info("##############################")
+        _logger.info(f"Searching users with tag: {tag_number}")
+
+
+        config = self.get_ldap_config()
+        matching_users = []
+
+        with self.ldap_connection() as conn:
+            # Search all users and check mail attribute
+            # We search broadly because mail field might have the tag in various formats
+            search_filter = "(&(objectClass=user)(employeeID=*))"
+
+            result = conn.search_s(
+                config['base_dn'],
+                ldap.SCOPE_SUBTREE,
+                search_filter,
+                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName', 'employeeID', 'EmployeeNumber']
+            )
+
+            for entry in result:
+                # Check if entry is valid tuple with DN and attributes
+                if not entry or not isinstance(entry, tuple) or len(entry) != 2:
+                    continue
+
+                dn, attrs = entry
+
+                # Skip if attrs is None or not a dictionary
+                if attrs is None or not isinstance(attrs, dict):
+                    _logger.debug(f"Skipping entry with invalid attrs type: {type(attrs)}")
+                    continue
+
+                # Now safely access employeeID
+                ldap_tag_values = attrs.get('employeeID', [])
+
+                for ldap_tag_value in ldap_tag_values:
+                    if isinstance(ldap_tag_value, bytes):
+                        ldap_tag_value = ldap_tag_value.decode('utf-8')
+
+                    # Check if this employeeID value matches the tag
+                    if str(ldap_tag_value).strip() == str(tag_number).strip():
+                        _logger.info(f"Found matching user: DN={dn}")
+                        matching_users.append((dn, attrs))
+                        break
+
+        _logger.info(f"Found {len(matching_users)} users with tag {tag_number}")
+        _logger.info("##############################")
+        return matching_users
 
     @api.model
     def get_odoo_groups_from_ldap(self, member_of_list):

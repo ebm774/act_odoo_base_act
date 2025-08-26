@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Extend login page to add auth method selector -->
+    <template id="login_auth_selector" inherit_id="web.login" name="Login Auth Selector">
+        <!-- Add our fields at the beginning of the login form -->
+        <xpath expr="//input[@name='login']/.." position="before">
+            <div class="form-group field-auth-method">
+                <label for="auth_method">Authentication Method</label>
+                <select name="auth_method" id="auth_method" class="form-control" required="required">
+                    <option value="password">Username &amp; Password</option>
+                    <option value="tag">Tag/Badge</option>
+                </select>
+            </div>
+
+            <!-- Tag input field (hidden by default) -->
+            <div class="form-group field-tag-number" style="display:none;">
+                <label for="tag_number">Tag Number</label>
+                <input type="text" id="tag_number" name="tag_number"
+                       class="form-control" autofocus="autofocus"
+                       placeholder="Scan your badge"/>
+            </div>
+        </xpath>
+
+        <!-- Add JavaScript at the end of the page -->
+        <xpath expr="//input[@name='login']" position="after">
+            <script type="text/javascript">
+                document.addEventListener('DOMContentLoaded', function() {
+                    var authMethod = document.getElementById('auth_method');
+                    if (!authMethod) return;
+
+                    function toggleAuthMethod() {
+                        var loginInput = document.querySelector('input[name="login"]');
+                        var passwordInput = document.querySelector('input[name="password"]');
+                        var tagField = document.querySelector('.field-tag-number');
+                        var tagInput = document.getElementById('tag_number');
+
+                        if (authMethod.value === 'tag') {
+                            // Hide username and password
+                            if (loginInput) {
+                                var loginGroup = loginInput.closest('.form-group') || loginInput.parentElement;
+                                if (loginGroup) loginGroup.style.display = 'none';
+                            }
+                            if (passwordInput) {
+                                var passwordGroup = passwordInput.closest('.form-group') || passwordInput.parentElement;
+                                if (passwordGroup) passwordGroup.style.display = 'none';
+                            }
+                            // Show tag field
+                            if (tagField) {
+                                tagField.style.display = 'block';
+                                if (tagInput) tagInput.focus();
+                            }
+                        } else {
+                            // Show username and password
+                            if (loginInput) {
+                                var loginGroup = loginInput.closest('.form-group') || loginInput.parentElement;
+                                if (loginGroup) loginGroup.style.display = 'block';
+                            }
+                            if (passwordInput) {
+                                var passwordGroup = passwordInput.closest('.form-group') || passwordInput.parentElement;
+                                if (passwordGroup) passwordGroup.style.display = 'block';
+                            }
+                            // Hide tag field
+                            if (tagField) {
+                                tagField.style.display = 'none';
+                            }
+                            if (loginInput) loginInput.focus();
+                        }
+                    }
+
+                    authMethod.addEventListener('change', toggleAuthMethod);
+
+                    // Handle Enter key in tag field
+                    var tagInput = document.getElementById('tag_number');
+                    if (tagInput) {
+                        tagInput.addEventListener('keypress', function(e) {
+                            if (e.key === 'Enter' || e.keyCode === 13) {
+                                e.preventDefault();
+                                document.querySelector('form.oe_login_form').submit();
+                            }
+                        });
+                    }
+                });
+            </script>
+        </xpath>
+    </template>
+
+    <!-- Template for user selection when multiple accounts -->
+    <template id="select_user" name="Select User Account">
+        <html>
+            <head>
+                <meta charset="utf-8"/>
+                <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <title>Select Account - Odoo</title>
+                <link rel="stylesheet" href="/web/static/lib/bootstrap/css/bootstrap.css"/>
+                <link rel="stylesheet" href="/web/static/src/legacy/css/ui.css"/>
+            </head>
+            <body class="bg-light">
+                <div class="container">
+                    <div class="row justify-content-center mt-5">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-body">
+                                    <form class="oe_login_form" role="form" method="post" action="/web/login">
+                                        <input type="hidden" name="csrf_token" t-att-value="csrf_token"/>
+
+                                        <h3 class="text-center mb-4">Multiple accounts found</h3>
+                                        <p class="text-center">Please select your account:</p>
+
+                                        <div class="list-group mb-3">
+                                            <t t-foreach="tag_users" t-as="user">
+                                                <button type="submit" name="selected_user"
+                                                        t-att-value="user['login']"
+                                                        class="list-group-item list-group-item-action">
+                                                    <t t-out="user['display_name']"/>
+                                                    <small class="text-muted ml-2">(<t t-out="user['login']"/>)</small>
+                                                </button>
+                                            </t>
+                                        </div>
+
+                                        <div class="text-center">
+                                            <a href="/web/login" class="btn btn-link">Back to login</a>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </body>
+        </html>
+    </template>
+</odoo>
