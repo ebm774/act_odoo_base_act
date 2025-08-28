@@ -91,110 +91,73 @@ class LoginController(Home):
         response = super().web_login(redirect, **kw)
         return response
 
-
     def _process_tag_login(self, login, ldap_attrs, redirect=None):
         """Process login for tag-authenticated user"""
-
-        _logger.info("#######################")
         _logger.info("_process_tag_login")
-        _logger.info("#######################")
-
         try:
-
             # Create or get user
             users = request.env['res.users'].sudo()
-            user = request.env['res.users'].sudo().search([('login', '=', login)], limit=1)
-
-            _logger.info("#######################")
-            _logger.info("login : " + login)
-            _logger.info("#######################")
+            user = users.search([('login', '=', login)], limit=1)
+            _logger.info(f"login : {login}")
 
             if not user:
-
-                _logger.info("#######################")
-                _logger.info("not user")
-                _logger.info("#######################")
-
+                _logger.info("Creating new user from LDAP")
                 company = request.env.company or request.env['res.company'].sudo().search([], limit=1)
-
-                # Create user from LDAP
                 user_id = users.with_company(company)._sync_ldap_user(ldap_attrs, login)
                 if not user_id:
                     raise ValueError("Failed to create user")
                 user = users.browse(user_id)
-
             else:
-
-                _logger.info("#######################")
-                _logger.info("else")
-                for ldap_attr in ldap_attrs:
-                    _logger.info(ldap_attr)
-                _logger.info("#######################")
-
-                # Update existing user
+                _logger.info("Updating existing user")
                 user._sync_ldap_user(ldap_attrs, login)
 
-            _logger.info("#######################")
-            _logger.info("prout")
-            _logger.info("#######################")
-
-            # Generate temporary token for tag authentication
-            token = secrets.token_urlsafe(32)
-            user.write({
-                'tag_auth_token': token,
-                'tag_auth_expiry': fields.Datetime.now() + datetime.timedelta(seconds=30)
-            })
-
-            _logger.info("#######################")
-            _logger.info("user.write done")
-            _logger.info("#######################")
-
-
             request.env.cr.commit()
-            _logger.info("#######################")
-            _logger.info("cr commit done")
-            _logger.info("#######################")
-            #
-            # # Authenticate using the token as password
-            # uid = request.session.authenticate(
-            #     request.db,
-            #     login,
-            #     token
-            # )
-            #
-            # if not uid:
-            #     raise ValueError("Authentication failed")
+            _logger.info("User sync completed")
 
-            _logger.info("#######################")
-            _logger.info("session authenticate done")
-            _logger.info("#######################")
+            # Generate temporary password and temporarily disable LDAP
+            temp_password = secrets.token_urlsafe(32)
+            _logger.info("Generated temp password")
 
-            request.session.db = request.db
-            request.session.uid = user.id
-            request.session.login = login
-
-            request.update_env(user=user.id)
-
-            # Clear the token after use
-            user.write({
-                'tag_auth_token': False,
-                'tag_auth_expiry': False
+            user.sudo().write({
+                'password': temp_password,
+                'is_ldap_user': False,
             })
-
+            _logger.info("Updated user with temp password")
             request.env.cr.commit()
+            _logger.info("Committed temp password")
 
-            _logger.info("#######################")
-            _logger.info("user.write to clear token done")
-            _logger.info("#######################")
+            # Authenticate normally (server-side API expects positional args)
+            _logger.info("About to call session.authenticate")
+            _logger.info("db name is : %s", request.db)
 
-            return request.redirect(redirect or '/web')
+            credential = {
+                'type': 'password',  # required by Odoo
+                'login': login,  # the user login you found
+                'password': temp_password,  # placeholder; won’t be used if you short-circuit
+            }
 
+            uid = request.session.authenticate(request.db, credential)
+            _logger.info(f"Authentication returned: {uid}")
 
+            if uid:
+                _logger.info("Authentication successful via temp password")
+                # Re-enable LDAP and clear password
+                user.sudo().write({
+                    'password': False,
+                    'is_ldap_user': True,
+                })
+                request.env.cr.commit()
+                _logger.info("Restored user settings")
 
+                return request.redirect(redirect or '/web')
 
+            raise ValueError("Authentication failed")
 
         except Exception as e:
             _logger.error(f"Tag login error: {e}")
+            _logger.error(f"Error type: {type(e)}")
+            import traceback
+            _logger.error(f"Full traceback: {traceback.format_exc()}")
             request.env.cr.rollback()
             values = request.params.copy()
             values['error'] = _("Authentication failed: Unable to create or access user account")

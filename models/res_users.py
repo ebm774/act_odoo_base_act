@@ -5,8 +5,6 @@ import logging
 import secrets
 import datetime
 
-from psutil import AccessDenied
-
 _logger = logging.getLogger(__name__)
 
 
@@ -18,55 +16,23 @@ class ResUsers(models.Model):
     tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
 
     @classmethod
+    @classmethod
     def authenticate(cls, db, credential, user_agent_env):
         """Override authenticate - this is a classmethod!"""
         login = credential.get('login')
         password = credential.get('password')
         tag_auth = credential.get('tag_authenticated', False)
-        tag_number = credential.get('tag_number')
 
-        _logger.error(f"[LDAP] Authenticate called for: {login}")
+        _logger.debug(f"[AUTH] Authenticate called for: {login}, tag_auth: {tag_auth}")
 
+        # ONLY intercept if it's explicit tag authentication
+        if tag_auth:
+            _logger.debug(f"[TAG] Processing tag authentication")
+            # Tag authentication is handled in controller via manual session setup
+            # This path shouldn't normally be reached, but just in case:
+            raise AccessDenied("Tag authentication should be handled by controller")
 
-        # Handle tag authentication (no password required)
-        if tag_auth :
-            with cls.pool.cursor() as cr:
-                env = api.Environment(cr, SUPERUSER_ID, {})
-                user = env['res.users'].search([('login', '=', login)])
-                if user:
-
-                    pass
-
-                    # if tag_number and user.badge_number:
-                    #     if str(user.badge_number) != str(tag_number):
-                    #         _logger.warning(
-                    #             f"[AUTH] Badge mismatch for {login}: expected {user.badge_number}, got {tag_number}")
-                    #         raise AccessDenied("Badge number mismatch")
-                    #
-                    # # Generate and SAVE the token to database
-                    # token = secrets.token_urlsafe(32)
-                    # expiry = fields.Datetime.now() + datetime.timedelta(seconds=30)
-                    #
-                    # user.sudo().write({
-                    #     'tag_auth_token': token,
-                    #     'tag_auth_expiry': expiry
-                    # })
-                    # cr.commit()
-                    #
-                    # _logger.info(f"[AUTH] Tag token saved for user: {login}")
-                    # credential['password'] = token
-                    #
-                    # return {
-                    #     'uid': user.id,
-                    #     'auth_method': 'tag',
-                    #     'mfa': 'default'
-                    # }
-
-                else:
-                    _logger.warning(f"[AUTH] User {login} not found for tag auth")
-                    raise AccessDenied("User not found")
-
-        # Get database cursor
+        # For LDAP users, try LDAP authentication first (but don't break normal auth)
         with cls.pool.cursor() as cr:
             env = api.Environment(cr, SUPERUSER_ID, {})
 
@@ -75,116 +41,101 @@ class ResUsers(models.Model):
             ldap_enabled = ICP.get_param('base_act.ldap_enabled', 'False') == 'True'
 
             if ldap_enabled and login:
-                _logger.error(f"[LDAP] LDAP is enabled, checking for user: {login}")
                 try:
                     Users = env['res.users']
-                    user = Users.search([('login', '=', login)])
+                    user = Users.search([('login', '=', login)], limit=1)
 
+                    # If user doesn't exist, try to create from LDAP
                     if not user:
-                        # Try to create from LDAP
                         connector = env['base_act.ldap.connector']
                         user_data = connector.search_user(login)
-                        if user_data:
-                            _logger.error(f"[LDAP] User found in LDAP, creating Odoo user")
+                        if user_data and connector.authenticate_user(login, password):
+                            _logger.debug(f"[LDAP] Creating new user from LDAP")
                             _, ldap_attrs = user_data
-                            # Check if password is valid first
-                            if connector.authenticate_user(login, password):
-                                users_model = Users.with_user(SUPERUSER_ID)
-                                user_id = users_model._sync_ldap_user(ldap_attrs, login)
-                                cr.commit()  # Commit the user creation
-                                if user_id:
-                                    _logger.error(f"[LDAP] Created user with ID: {user_id}")
-                                    return {
-                                        'uid': user_id,
-                                        'auth_method': 'ldap',
-                                        'mfa': 'default'
-                                    }
+                            users_model = Users.with_user(SUPERUSER_ID)
+                            user_id = users_model._sync_ldap_user(ldap_attrs, login)
+                            cr.commit()
+                            if user_id:
+                                return {
+                                    'uid': user_id,
+                                    'auth_method': 'ldap',
+                                    'mfa': 'default'
+                                }
 
-                    # If user exists and is LDAP user, try LDAP authentication
+                    # If user exists and is LDAP user, validate via LDAP
                     elif user and user.is_ldap_user:
                         connector = env['base_act.ldap.connector']
                         if connector.authenticate_user(login, password):
-                            _logger.error(f"[LDAP] Existing LDAP user authenticated successfully")
+                            _logger.debug(f"[LDAP] LDAP authentication successful")
                             # Sync user data from LDAP
                             user_data = connector.search_user(login)
                             if user_data:
                                 _, ldap_attrs = user_data
                                 user._sync_ldap_user(ldap_attrs, login)
-
                             return {
                                 'uid': user.id,
                                 'auth_method': 'ldap',
                                 'mfa': 'default'
                             }
                         else:
-                            _logger.error(f"[LDAP] LDAP authentication failed for existing user")
-                            from odoo.exceptions import AccessDenied
+                            # LDAP auth failed for LDAP user - don't try standard auth
                             raise AccessDenied("Invalid LDAP credentials")
 
+                except AccessDenied:
+                    raise  # Re-raise LDAP auth failures
                 except Exception as e:
-                    _logger.error(f"[LDAP] Error during user lookup/creation: {e}")
-                    import traceback
-                    _logger.error(traceback.format_exc())
+                    _logger.error(f"[LDAP] Error during LDAP authentication: {e}")
+                    # Don't break normal auth for LDAP errors - fall through
 
-        # Continue with normal authentication
+        # For all other cases (non-LDAP users, LDAP disabled, etc), use standard Odoo authentication
         return super(ResUsers, cls).authenticate(db, credential, user_agent_env)
 
     def _check_credentials(self, password, user_agent_env):
         """Check credentials - try LDAP first for LDAP users"""
-        _logger.error(f"[LDAP] _check_credentials for user: {self.login}, is_ldap: {self.is_ldap_user}")
+        _logger.debug(f"[DEBUG] _check_credentials called for user: {self.login}")
 
-        _logger.error("################################")
-        _logger.error(f"[DEBUG] Tag token: {self.tag_auth_token}")
-        _logger.error(f"[DEBUG] Tag expiry: {self.tag_auth_expiry}")
-        _logger.error(f"[DEBUG] Password received: {password}")
-        _logger.error(f"[DEBUG] Password type: {type(password)}")
+        # ✅ EXTRACT PASSWORD FROM DICT IF NEEDED
+        actual_password = password
+        if isinstance(password, dict):
+            actual_password = password.get('password', '')
+            _logger.debug(f"[DEBUG] Extracted password from dict")
 
+        _logger.debug(f"[DEBUG] Actual password type: {type(actual_password)}")
 
-        # Check tag authentication token first
+        # ✅ FIRST: Check if this is tag authentication with a valid token
         if self.tag_auth_token and self.tag_auth_expiry:
-            _logger.error(f"[DEBUG] Checking token validity...")
-            if fields.Datetime.now() <= self.tag_auth_expiry and password == self.tag_auth_token:
-                _logger.info(f"[AUTH] Tag token authentication successful for {self.login}")
-                return
-            else:
-                _logger.error(f"[DEBUG] Token validation failed - expired or mismatch")
-        else:
-            _logger.error(f"[DEBUG] No tag auth token set")
-        _logger.error("################################")
+            _logger.debug(f"[DEBUG] Found tag token, checking validity...")
+            _logger.debug(f"[DEBUG] Token match: {actual_password == self.tag_auth_token}")
 
-        # Check if LDAP is enabled
+            if fields.Datetime.now() <= self.tag_auth_expiry and actual_password == self.tag_auth_token:
+                _logger.info(f"[DEBUG] ✅ TAG AUTHENTICATION SUCCESSFUL - BYPASSING LDAP")
+                return  # ✅ SUCCESS - Exit early, don't check LDAP
+            else:
+                _logger.debug(f"[DEBUG] ❌ Tag token invalid or expired")
+
+        # ✅ SECOND: For non-tag authentication, check LDAP if enabled
         ICP = self.env['ir.config_parameter'].sudo()
         ldap_enabled = ICP.get_param('base_act.ldap_enabled', 'False') == 'True'
 
         if ldap_enabled and self.is_ldap_user:
-            _logger.error(f"[LDAP] User {self.login} is LDAP user, checking LDAP")
-
-            actual_password = password
-            if isinstance(password, dict):
-                actual_password = password.get('password', '')
-                _logger.error(f"[LDAP] Extracted password from dict")
-
-            _logger.error(f"[LDAP] Password type: {type(actual_password)}")
+            _logger.debug(f"[DEBUG] Proceeding with LDAP authentication")
 
             try:
                 connector = self.env['base_act.ldap.connector']
                 ldap_attrs = connector.authenticate_user(self.login, actual_password)
                 if ldap_attrs:
-                    _logger.error(f"[LDAP] LDAP authentication successful")
-                    # Update user data from LDAP
+                    _logger.debug(f"[DEBUG] LDAP authentication successful")
                     self.sudo()._sync_ldap_user(ldap_attrs, self.login)
-                    return  # Success - no exception = valid
+                    return  # Success
                 else:
-                    _logger.error(f"[LDAP] LDAP authentication failed")
+                    _logger.debug(f"[DEBUG] LDAP authentication failed")
                     raise AccessDenied("Invalid LDAP credentials")
             except AccessDenied:
                 raise
             except Exception as e:
-                _logger.error(f"[LDAP] Error during LDAP auth: {e}")
-                import traceback
-                _logger.error(traceback.format_exc())
+                _logger.error(f"[DEBUG] Error during LDAP auth: {e}")
                 raise AccessDenied("LDAP authentication error")
 
-        # Fallback to standard auth for non-LDAP users
-        _logger.error(f"[LDAP] Using standard authentication")
+        # ✅ THIRD: Fallback to standard authentication for non-LDAP users
+        _logger.debug(f"[DEBUG] Using standard Odoo authentication")
         return super()._check_credentials(password, user_agent_env)
