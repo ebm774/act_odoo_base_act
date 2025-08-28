@@ -169,7 +169,7 @@ class LoginController(Home):
             _logger.info("session authenticate done")
             _logger.info("#######################")
 
-            request.session.db = 'odoo-dev'
+            request.session.db = request.db
             request.session.uid = user.id
             request.session.login = login
 
