@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import http, _, fields
+from odoo import http, _, fields, api
 from odoo.http import request
 from odoo.addons.web.controllers.home import Home
 import datetime
@@ -100,6 +100,7 @@ class LoginController(Home):
         _logger.info("#######################")
 
         try:
+
             # Create or get user
             users = request.env['res.users'].sudo()
             user = request.env['res.users'].sudo().search([('login', '=', login)], limit=1)
@@ -153,17 +154,26 @@ class LoginController(Home):
             _logger.info("#######################")
             _logger.info("cr commit done")
             _logger.info("#######################")
-
-            # Authenticate using the token as password
-            request.session.authenticate(request.db, {
-                'login': login,
-                'password': token,
-                'type': 'password'
-            })
+            #
+            # # Authenticate using the token as password
+            # uid = request.session.authenticate(
+            #     request.db,
+            #     login,
+            #     token
+            # )
+            #
+            # if not uid:
+            #     raise ValueError("Authentication failed")
 
             _logger.info("#######################")
             _logger.info("session authenticate done")
             _logger.info("#######################")
+
+            request.session.db = 'odoo-dev'
+            request.session.uid = user.id
+            request.session.login = login
+
+            request.update_env(user=user.id)
 
             # Clear the token after use
             user.write({
@@ -171,11 +181,17 @@ class LoginController(Home):
                 'tag_auth_expiry': False
             })
 
+            request.env.cr.commit()
+
             _logger.info("#######################")
             _logger.info("user.write to clear token done")
             _logger.info("#######################")
 
             return request.redirect(redirect or '/web')
+
+
+
+
 
         except Exception as e:
             _logger.error(f"Tag login error: {e}")

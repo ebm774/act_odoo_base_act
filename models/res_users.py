@@ -5,6 +5,8 @@ import logging
 import secrets
 import datetime
 
+from psutil import AccessDenied
+
 _logger = logging.getLogger(__name__)
 
 
@@ -21,22 +23,48 @@ class ResUsers(models.Model):
         login = credential.get('login')
         password = credential.get('password')
         tag_auth = credential.get('tag_authenticated', False)
+        tag_number = credential.get('tag_number')
 
         _logger.error(f"[LDAP] Authenticate called for: {login}")
 
 
         # Handle tag authentication (no password required)
-        if tag_auth:
+        if tag_auth :
             with cls.pool.cursor() as cr:
                 env = api.Environment(cr, SUPERUSER_ID, {})
                 user = env['res.users'].search([('login', '=', login)])
                 if user:
-                    _logger.info(f"[AUTH] Tag authentication successful for user: {login}")
-                    return {
-                        'uid': user.id,
-                        'auth_method': 'tag',
-                        'mfa': 'default'
-                    }
+
+                    pass
+
+                    # if tag_number and user.badge_number:
+                    #     if str(user.badge_number) != str(tag_number):
+                    #         _logger.warning(
+                    #             f"[AUTH] Badge mismatch for {login}: expected {user.badge_number}, got {tag_number}")
+                    #         raise AccessDenied("Badge number mismatch")
+                    #
+                    # # Generate and SAVE the token to database
+                    # token = secrets.token_urlsafe(32)
+                    # expiry = fields.Datetime.now() + datetime.timedelta(seconds=30)
+                    #
+                    # user.sudo().write({
+                    #     'tag_auth_token': token,
+                    #     'tag_auth_expiry': expiry
+                    # })
+                    # cr.commit()
+                    #
+                    # _logger.info(f"[AUTH] Tag token saved for user: {login}")
+                    # credential['password'] = token
+                    #
+                    # return {
+                    #     'uid': user.id,
+                    #     'auth_method': 'tag',
+                    #     'mfa': 'default'
+                    # }
+
+                else:
+                    _logger.warning(f"[AUTH] User {login} not found for tag auth")
+                    raise AccessDenied("User not found")
 
         # Get database cursor
         with cls.pool.cursor() as cr:
