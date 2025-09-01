@@ -85,7 +85,9 @@ class LDAPUsers(models.AbstractModel):
 
             try:
                 # Create using the res.users model, not self
-                user = self.sudo().create(user_vals)
+                # user = self.sudo().create(user_vals)
+
+                user = self.sudo().with_context(no_reset_password=True).create(user_vals)
 
                 _logger.info(f"Created new LDAP user: {ldap_login} with ID: {user.id}")
                 return user.id
@@ -154,39 +156,104 @@ class LDAPUsers(models.AbstractModel):
                     _logger.info(f"Created LDAP group: {group_name}")
 
             user.groups_id = [(4, group.id)]
-    #
-    # @api.model
-    # def cron_sync_ldap_users(self):
-    #     """CRON job to sync all LDAP users"""
-    #     ICP = self.env['ir.config_parameter'].sudo()
-    #     if ICP.get_param('base_act.ldap_enabled', 'False') != 'True':
-    #         return
-    #
-    #     connector = self.env['base_act.ldap.connector']
-    #     config = connector.get_ldap_config()
-    #
-    #     try:
-    #         with connector.ldap_connection() as conn:
-    #             # Search all users with odoo_ groups
-    #             search_filter = "(&(objectClass=user)(memberOf=*odoo_*))"
-    #
-    #             results = conn.search_s(
-    #                 config['base_dn'],
-    #                 ldap.SCOPE_SUBTREE,
-    #                 search_filter,
-    #                 ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName']
-    #             )
-    #
-    #             for dn, attrs in results:
-    #                 if attrs:
-    #                     login = attrs.get('sAMAccountName', [b''])[0]
-    #                     if login:
-    #                         login = login.decode('utf-8') if isinstance(login, bytes) else login
-    #                         self._sync_ldap_user(attrs, login)
-    #                         _logger.debug(f"Synced LDAP user: {login}")
-    #
-    #             self.env.cr.commit()
-    #             _logger.info(f"LDAP sync completed: {len(results)} users processed")
-    #
-    #     except Exception as e:
-    #         _logger.error(f"CRON LDAP sync error: {str(e)}")
+
+    @api.model
+    def cron_sync_ldap_users_with_employee_id(self):
+        """CRON job to sync LDAP users with employeeId using existing auth process"""
+        _logger.info("Starting LDAP user sync for users with employeeId")
+
+        ICP = self.env['ir.config_parameter'].sudo()
+        if ICP.get_param('base_act.ldap_enabled', 'False') != 'True':
+            _logger.info("LDAP not enabled, skipping sync")
+            return
+
+        connector = self.env['base_act.ldap.connector']
+        config = connector.get_ldap_config()
+        users_synced = 0
+        users_created = 0
+        users_updated = 0
+
+        try:
+            with connector.ldap_connection() as conn:
+                # Use a broader search to get all users, then filter
+                search_filter = "(&(objectClass=user)(sAMAccountName=*))"
+
+                results = conn.search_s(
+                    config['base_dn'],
+                    ldap.SCOPE_SUBTREE,
+                    search_filter,
+                    ['sAMAccountName', 'displayName', 'mail', 'memberOf',
+                     'userPrincipalName', 'employeeId', 'employeeNumber']
+                )
+
+                # Use the same referral filtering logic as search_user method
+                for entry in results:
+                    # Skip invalid entries and referrals (same as your working search_user method)
+                    if not isinstance(entry, tuple) or len(entry) != 2:
+                        continue
+
+                    dn, attrs = entry
+
+                    # Skip LDAP referrals and invalid entries
+                    if not attrs or not isinstance(attrs, dict) or 'sAMAccountName' not in attrs:
+                        continue
+
+                    login_raw = attrs.get('sAMAccountName', [])
+                    employee_id_raw = attrs.get('employeeId', [])
+
+                    if not login_raw:
+                        continue
+
+                    login = login_raw[0]
+                    login = login.decode('utf-8') if isinstance(login, bytes) else login
+
+                    # Check if employeeId exists and is not "<not set>"
+                    if not employee_id_raw:
+                        continue
+
+                    employee_id = employee_id_raw[0]
+                    employee_id = employee_id.decode('utf-8') if isinstance(employee_id, bytes) else employee_id
+
+                    # Skip if employeeId is "<not set>" or similar
+                    if employee_id.strip().lower() in ['<not set>', 'not set', '', 'null']:
+                        continue
+
+                    try:
+                        # Use the existing authentication process
+                        # Check if user exists in Odoo
+                        existing_user = self.search([('login', '=', login)], limit=1)
+
+                        if existing_user:
+                            # Update existing user using existing sync method
+                            existing_user.sudo().with_context(
+                                no_reset_password=True,
+                                mail_create_nosubscribe=True,
+                                mail_create_nolog=True
+                            )._sync_ldap_user(attrs, login)
+                            users_updated += 1
+                            _logger.debug(f"Updated LDAP user: {login} (badge_number: {employee_id})")
+                        else:
+                            # Create new user using existing sync method (same as auth flow)
+                            result = self.sudo().with_context(
+                                no_reset_password=True,
+                                mail_create_nosubscribe=True,
+                                mail_create_nolog=True
+                            )._sync_ldap_user(attrs, login)
+                            if result:
+                                users_created += 1
+                                _logger.debug(f"Created LDAP user: {login} (badge_number: {employee_id})")
+
+                        users_synced += 1
+
+                    except Exception as user_error:
+                        _logger.error(f"Failed to sync user {login}: {str(user_error)}")
+                        continue
+
+                self.env.cr.commit()
+                _logger.info(
+                    f"LDAP sync completed: {users_synced} total, {users_created} created, {users_updated} updated")
+
+        except Exception as e:
+            _logger.error(f"CRON LDAP sync error: {str(e)}")
+            self.env.cr.rollback()
+
