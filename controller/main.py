@@ -143,7 +143,7 @@ class LoginController(Home):
                 _logger.info("Authentication successful via temp password")
                 # Re-enable LDAP and clear password
                 user.sudo().write({
-                    'password': False,
+                    'password': '',
                     'is_ldap_user': True,
                 })
                 request.env.cr.commit()

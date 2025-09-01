@@ -62,23 +62,30 @@ class ResUsers(models.Model):
                                     'mfa': 'default'
                                 }
 
-                    # If user exists and is LDAP user, validate via LDAP
-                    elif user and user.is_ldap_user:
+                    # If user doesn't exist, try to create from LDAP
+                    if not user:
                         connector = env['base_act.ldap.connector']
-                        if connector.authenticate_user(login, password):
-                            _logger.debug(f"[LDAP] LDAP authentication successful")
-                            # Sync user data from LDAP
-                            user_data = connector.search_user(login)
-                            if user_data:
-                                _, ldap_attrs = user_data
-                                user._sync_ldap_user(ldap_attrs, login)
-                            return {
-                                'uid': user.id,
-                                'auth_method': 'ldap',
-                                'mfa': 'default'
-                            }
+                        user_data = connector.search_user(login)
+                        if user_data:
+                            dn, attrs = user_data
+                            ldap_attrs = connector.authenticate_user(login, password)  # ✅ Use authenticate_user return
+                            if ldap_attrs:
+                                _logger.debug(f"[LDAP] Creating new user from LDAP")
+
+                                if not isinstance(ldap_attrs, dict):
+                                    _logger.error(f"[LDAP] Expected dict, got {type(ldap_attrs)}: {ldap_attrs}")
+                                    raise AccessDenied("LDAP data format error")
+
+                                users_model = Users.with_user(SUPERUSER_ID)
+                                user_id = users_model._sync_ldap_user(ldap_attrs, login)
+                                cr.commit()
+                                if user_id:
+                                    return {
+                                        'uid': user_id,
+                                        'auth_method': 'ldap',
+                                        'mfa': 'default'
+                                    }
                         else:
-                            # LDAP auth failed for LDAP user - don't try standard auth
                             raise AccessDenied("Invalid LDAP credentials")
 
                 except AccessDenied:

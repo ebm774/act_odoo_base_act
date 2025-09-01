@@ -27,9 +27,19 @@ class LDAPUsers(models.AbstractModel):
         _logger.info("_sync_ldap_user")
         _logger.info("##############################")
 
+        # Add debug logging to see what we're getting
+        _logger.info(f"[DEBUG] ldap_attrs type: {type(ldap_attrs)}")
+        _logger.info(f"[DEBUG] ldap_attrs content: {ldap_attrs}")
+
+        #  Early validation - fail fast if not a dict
+        if not isinstance(ldap_attrs, dict):
+            _logger.error(f"[LDAP] Expected dict for ldap_attrs, got {type(ldap_attrs)}: {ldap_attrs}")
+            return None
+
         # Helper to extract attributes
         def get_attr(attrs, key, default=''):
-            if isinstance(attrs, list):
+            # ✅ Fixed: Only proceed if attrs is a dict
+            if not isinstance(attrs, dict):
                 return default
             val = attrs.get(key, [b''])[0] if attrs.get(key) else b''
             return val.decode('utf-8') if isinstance(val, bytes) else default
@@ -40,7 +50,7 @@ class LDAPUsers(models.AbstractModel):
         worker_id = get_attr(ldap_attrs, 'employeeNumber')
         email = get_attr(ldap_attrs, 'userPrincipalName')
         ldap_login = get_attr(ldap_attrs, 'sAMAccountName')
-        member_of = ldap_attrs.get('memberOf', [])
+        member_of = ldap_attrs.get('memberOf', []) if isinstance(ldap_attrs, dict) else []
 
         # Use the login from LDAP if available, otherwise use the passed login
         if not ldap_login:

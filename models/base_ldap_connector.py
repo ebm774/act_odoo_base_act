@@ -17,6 +17,7 @@ class LDAPConnector(models.AbstractModel):
     _description = 'LDAP Connector Service'
 
     @api.model
+    @tools.ormcache()
     def get_ldap_config(self):
         """Get LDAP configuration from system parameters"""
 
@@ -88,11 +89,6 @@ class LDAPConnector(models.AbstractModel):
     @api.model
     def search_user(self, login):
         """Search for a user in LDAP by login (sAMAccountName)"""
-
-        _logger.info("##############################")
-        _logger.info("search_user")
-        _logger.info("##############################")
-
         config = self.get_ldap_config()
 
         with self.ldap_connection() as conn:
@@ -102,11 +98,22 @@ class LDAPConnector(models.AbstractModel):
                 config['base_dn'],
                 ldap.SCOPE_SUBTREE,
                 search_filter,
-                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName', 'employeeID', 'EmployeeNumber']
+                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName', 'employeeID',
+                 'EmployeeNumber']
             )
 
-            if result and result[0][1]:
-                return result[0]  # Return (dn, attributes)
+            # Fixed: Filter out referrals and find actual user data
+            for entry in result:
+                if isinstance(entry, tuple) and len(entry) == 2:
+                    dn, attrs = entry
+                    #  Skip LDAP referrals (they have None attrs or list attrs)
+                    if attrs and isinstance(attrs, dict) and 'sAMAccountName' in attrs:
+                        _logger.debug(f"[LDAP] Found user: {dn}")
+                        return (dn, attrs)
+                    else:
+                        _logger.debug(f"[LDAP] Skipping referral or invalid entry: {entry}")
+
+        _logger.debug(f"[LDAP] User {login} not found")
         return None
 
     @api.model
@@ -117,8 +124,10 @@ class LDAPConnector(models.AbstractModel):
         _logger.info("authenticate_user")
         _logger.info("##############################")
 
+        config = self.get_ldap_config()
 
-        user_data = self.search_user(login)
+
+        user_data = self._search_user_with_config(login, config)
         if not user_data:
             return False
 
@@ -134,6 +143,75 @@ class LDAPConnector(models.AbstractModel):
         except Exception as e:
             _logger.error(f"LDAP authentication error for {login}: {str(e)}")
             return False
+
+    def _search_user_with_config(self, login, config):
+        """Search user with provided config"""
+        with self._ldap_connection_with_config(config) as conn:
+            search_filter = f"(&(objectClass=user)(sAMAccountName={ldap.filter.escape_filter_chars(login)}))"
+            result = conn.search_s(
+                config['base_dn'],
+                ldap.SCOPE_SUBTREE,
+                search_filter,
+                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName', 'employeeID',
+                 'EmployeeNumber']
+            )
+            # ✅ Your existing referral filtering logic here
+            for entry in result:
+                if isinstance(entry, tuple) and len(entry) == 2:
+                    dn, attrs = entry
+                    if attrs and isinstance(attrs, dict) and 'sAMAccountName' in attrs:
+                        return (dn, attrs)
+            return None
+
+    @contextmanager
+    def _ldap_connection_with_config(self, config, bind_dn=None, bind_password=None):
+        """Context manager for LDAP connections using provided config"""
+        conn = None
+
+        # If no specific bind credentials, use service account from config
+        if not bind_dn:
+            bind_dn = config['bind_dn']
+            bind_password = config['bind_password']
+
+        servers = []
+        if config.get('server_local'):
+            servers.append(config['server_local'])
+
+        last_error = None
+        for server in servers:
+            try:
+                _logger.info(f"[LDAP] Attempting connection to: {server}")
+                _logger.info(f"[LDAP] Using bind DN: {bind_dn}")
+
+                conn = ldap.initialize(server)
+                conn.set_option(ldap.OPT_REFERRALS, 0)
+                conn.set_option(ldap.OPT_NETWORK_TIMEOUT, config['timeout'])
+
+                # Try simple bind
+                conn.protocol_version = ldap.VERSION3
+                conn.simple_bind_s(bind_dn, bind_password)
+
+                _logger.info(f"[LDAP] Successfully connected to {server}")
+                yield conn
+                return
+
+            except ldap.INVALID_CREDENTIALS as e:
+                last_error = e
+                _logger.error(f"[LDAP] Invalid credentials for {bind_dn}: {e}")
+
+            except Exception as e:
+                last_error = e
+                _logger.error(f"[LDAP] Failed to connect to {server}: {str(e)}")
+
+            finally:
+                if conn:
+                    try:
+                        conn.unbind()
+                    except:
+                        pass
+
+        # If we get here, all servers failed
+        raise Exception(f"Could not connect to any LDAP server. Last error: {last_error}")
 
     @api.model
     def search_users_by_tag(self, tag_number):
