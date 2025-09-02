@@ -17,7 +17,7 @@ class LDAPUsers(models.AbstractModel):
 
     ldap_uid = fields.Char('LDAP UID', readonly=True)
     is_ldap_user = fields.Boolean('LDAP User', default=False)
-    badge_number = fields.Integer('Badge Number')  # For storing badge from mail field
+    badge_number = fields.Char('Badge Number')  # For storing badge from mail field
     worker_id = fields.Integer('Worker Number')
     email = fields.Char('Email')
 
@@ -57,9 +57,13 @@ class LDAPUsers(models.AbstractModel):
             ldap_login = login
 
 
-
         # Find existing user
-        user = self.search([('login', '=', ldap_login)], limit=1)
+        user = None
+        worker_id_int = int(worker_id) if worker_id and worker_id.isdigit() else 0
+        if worker_id_int:
+            user = self.search([('worker_id', '=', worker_id_int)], limit=1)
+        if not user:
+            user = self.search([('login', '=', ldap_login)], limit=1)
 
         # Get the default company
         company = self.env.company or self.env['res.company'].sudo().search([], limit=1)
@@ -70,7 +74,7 @@ class LDAPUsers(models.AbstractModel):
             'email': email,
             'ldap_uid': ldap_login,
             'is_ldap_user': True,
-            'badge_number': int(badge_number) if badge_number and badge_number.isdigit() else 0,
+            'badge_number': badge_number or '',
             'worker_id': int(worker_id) if worker_id and worker_id.isdigit() else 0,
             'company_id': company.id,
             'company_ids': [(4, company.id)],
@@ -88,8 +92,8 @@ class LDAPUsers(models.AbstractModel):
                 # user = self.sudo().create(user_vals)
 
                 user = self.sudo().with_context(no_reset_password=True).create(user_vals)
-
                 _logger.info(f"Created new LDAP user: {ldap_login} with ID: {user.id}")
+                self._sync_user_groups(user, member_of)
                 return user.id
             except Exception as e:
                 _logger.error(f"Failed to create user {ldap_login}: {e}")
@@ -99,6 +103,7 @@ class LDAPUsers(models.AbstractModel):
             try:
                 user.write(user_vals)
                 _logger.info(f"Updated LDAP user: {ldap_login}")
+                self._sync_user_groups(user, member_of)
                 return user.id
             except Exception as e:
                 _logger.error(f"Failed to update user {ldap_login}: {e}")
@@ -175,16 +180,106 @@ class LDAPUsers(models.AbstractModel):
 
         try:
             with connector.ldap_connection() as conn:
-                # Use a broader search to get all users, then filter
-                search_filter = "(&(objectClass=user)(sAMAccountName=*))"
+                # Use a broader search to get all users, then filter, exclud disabled OU
+                search_filter = "(&(objectClass=user)(sAMAccountName=*)(!(distinguishedName=*OU=Disabled_after_september_2025*))(!(distinguishedName=*OU=Disabled_before_september_2025*)))"
 
                 results = conn.search_s(
                     config['base_dn'],
                     ldap.SCOPE_SUBTREE,
                     search_filter,
                     ['sAMAccountName', 'displayName', 'mail', 'memberOf',
-                     'userPrincipalName', 'employeeId', 'employeeNumber']
+                     'userPrincipalName', 'employeeID', 'employeeNumber', 'distinguishedName']
                 )
+                _logger.info(f"=== LDAP SEARCH DEBUG ===")
+                _logger.info(f"Search filter used: {search_filter}")
+                _logger.info(f"Base DN: {config['base_dn']}")
+                _logger.info(f"Raw results count: {len(results)}")
+
+                valid_entries = 0
+                referrals = 0
+                no_attrs = 0
+                no_sam = 0
+                disabled_ou = 0
+                no_employee_id = 0
+                invalid_employee_id = 0
+
+                for i, entry in enumerate(results):
+                    if not isinstance(entry, tuple) or len(entry) != 2:
+                        referrals += 1
+                        continue
+
+                    dn, attrs = entry
+
+                    if not attrs or not isinstance(attrs, dict):
+                        no_attrs += 1
+                        continue
+
+                    if 'sAMAccountName' not in attrs:
+                        no_sam += 1
+                        continue
+
+                    # Check DN for disabled OU
+                    if 'Disabled_after_september_2025' in str(dn) or 'Disabled_before_september_2025' in str(dn):
+                        disabled_ou += 1
+                        _logger.debug(f"Filtered out disabled OU user: {dn}")
+                        continue
+
+                    login_raw = attrs.get('sAMAccountName', [])
+                    if login_raw:
+                        login = login_raw[0]
+                        login = login.decode('utf-8') if isinstance(login, bytes) else login
+                    else:
+                        continue
+
+                    employee_id_raw = attrs.get('employeeID', [])
+                    if not employee_id_raw:
+                        no_employee_id += 1
+                        _logger.debug(f"User {login} has no employeeID attribute")
+                        continue
+
+                    employee_id = employee_id_raw[0]
+                    employee_id = employee_id.decode('utf-8') if isinstance(employee_id, bytes) else employee_id
+
+                    if employee_id.strip().lower() in ['<not set>', 'not set', '', 'null']:
+                        invalid_employee_id += 1
+                        _logger.debug(f"User {login} has invalid employeeID: '{employee_id}'")
+                        continue
+
+                    valid_entries += 1
+                    _logger.info(f"VALID USER FOUND: {login} with employeeID: {employee_id}")
+
+                    # Only show first few valid users to avoid spam
+                    if valid_entries <= 3:
+                        _logger.info(f"Sample valid user {valid_entries}:")
+                        _logger.info(f"  DN: {dn}")
+                        _logger.info(f"  sAMAccountName: {login}")
+                        _logger.info(f"  employeeID: {employee_id}")
+                        if 'employeeNumber' in attrs:
+                            emp_num = attrs['employeeNumber'][0]
+                            emp_num = emp_num.decode('utf-8') if isinstance(emp_num, bytes) else emp_num
+                            _logger.info(f"  employeeNumber: {emp_num}")
+
+                _logger.info(f"=== FILTERING SUMMARY ===")
+                _logger.info(f"Total raw results: {len(results)}")
+                _logger.info(f"Referrals skipped: {referrals}")
+                _logger.info(f"No attributes: {no_attrs}")
+                _logger.info(f"No sAMAccountName: {no_sam}")
+                _logger.info(f"Disabled OU filtered: {disabled_ou}")
+                _logger.info(f"No employeeID: {no_employee_id}")
+                _logger.info(f"Invalid employeeID: {invalid_employee_id}")
+                _logger.info(f"VALID ENTRIES TO PROCESS: {valid_entries}")
+                _logger.info(f"=========================")
+
+                valid_entries = 0
+                referrals = 0
+                no_attrs = 0
+                no_sam = 0
+                disabled_ou = 0
+                no_employee_id = 0
+                invalid_employee_id = 0
+
+                _logger.info(f"LDAP search returned {len(results)} total results")
+                processed_count = 0
 
                 # Use the same referral filtering logic as search_user method
                 for entry in results:
@@ -199,7 +294,7 @@ class LDAPUsers(models.AbstractModel):
                         continue
 
                     login_raw = attrs.get('sAMAccountName', [])
-                    employee_id_raw = attrs.get('employeeId', [])
+                    employee_id_raw = attrs.get('employeeID', [])
 
                     if not login_raw:
                         continue
@@ -219,9 +314,33 @@ class LDAPUsers(models.AbstractModel):
                         continue
 
                     try:
-                        # Use the existing authentication process
-                        # Check if user exists in Odoo
-                        existing_user = self.search([('login', '=', login)], limit=1)
+                        # Extract employeeNumber for matching
+                        employee_number_raw = attrs.get('employeeNumber', [])
+                        employee_number = None
+                        if employee_number_raw:
+                            employee_number = employee_number_raw[0]
+                            employee_number = employee_number.decode('utf-8') if isinstance(employee_number,
+                                                                                            bytes) else employee_number
+                            employee_number = int(
+                                employee_number) if employee_number and employee_number.isdigit() else None
+
+                        # ✅ FIX: Additional check for disabled OUs (double-check)
+                        distinguished_name = attrs.get('distinguishedName', [])
+                        if distinguished_name:
+                            dn_str = distinguished_name[0]
+                            dn_str = dn_str.decode('utf-8') if isinstance(dn_str, bytes) else dn_str
+                            if 'OU=Disabled_after_september_2025' in dn_str or 'OU=Disabled_before_september_2025' in dn_str:
+                                _logger.debug(f"Skipping user in disabled OU: {dn_str}")
+                                continue
+
+                        # ✅ FIX: Search by worker_id (employeeNumber) instead of login
+                        existing_user = None
+                        if employee_number:
+                            existing_user = self.search([('worker_id', '=', employee_number)], limit=1)
+
+                        # If not found by worker_id, try by login as fallback
+                        if not existing_user:
+                            existing_user = self.search([('login', '=', login)], limit=1)
 
                         if existing_user:
                             # Update existing user using existing sync method
@@ -231,7 +350,7 @@ class LDAPUsers(models.AbstractModel):
                                 mail_create_nolog=True
                             )._sync_ldap_user(attrs, login)
                             users_updated += 1
-                            _logger.debug(f"Updated LDAP user: {login} (badge_number: {employee_id})")
+                            _logger.debug(f"Updated LDAP user: {login} (worker_id: {employee_number})")
                         else:
                             # Create new user using existing sync method (same as auth flow)
                             result = self.sudo().with_context(
@@ -241,7 +360,7 @@ class LDAPUsers(models.AbstractModel):
                             )._sync_ldap_user(attrs, login)
                             if result:
                                 users_created += 1
-                                _logger.debug(f"Created LDAP user: {login} (badge_number: {employee_id})")
+                                _logger.debug(f"Created LDAP user: {login} (worker_id: {employee_number})")
 
                         users_synced += 1
 
@@ -257,3 +376,57 @@ class LDAPUsers(models.AbstractModel):
             _logger.error(f"CRON LDAP sync error: {str(e)}")
             self.env.cr.rollback()
 
+    def _create_ldap_user_from_cron(self, ldap_attrs, login):
+        """Create LDAP user from cron job without requiring password authentication"""
+        _logger.info(f"Creating LDAP user from cron: {login}")
+
+        # Early validation - fail fast if not a dict
+        if not isinstance(ldap_attrs, dict):
+            _logger.error(f"[LDAP] Expected dict for ldap_attrs, got {type(ldap_attrs)}: {ldap_attrs}")
+            return None
+
+        # Helper to extract attributes (same as in _sync_ldap_user)
+        def get_attr(attrs, key, default=''):
+            if not isinstance(attrs, dict):
+                return default
+            val = attrs.get(key, [b''])[0] if attrs.get(key) else b''
+            return val.decode('utf-8') if isinstance(val, bytes) else default
+
+        # Extract user data
+        display_name = get_attr(ldap_attrs, 'displayName')
+        badge_number = get_attr(ldap_attrs, 'employeeID')  # ✅ Use consistent employeeID
+        worker_id = get_attr(ldap_attrs, 'employeeNumber')
+        email = get_attr(ldap_attrs, 'userPrincipalName')
+        ldap_login = get_attr(ldap_attrs, 'sAMAccountName')
+        member_of = ldap_attrs.get('memberOf', [])
+
+
+        try:
+            worker_id_int = int(worker_id) if worker_id and worker_id.isdigit() else 0
+        except (ValueError, AttributeError):
+            worker_id_int = 0
+
+        # Create user directly
+        user_vals = {
+            'name': display_name or login,
+            'login': login,
+            'email': email,
+            'ldap_uid': login,
+            'is_ldap_user': True,
+            'badge_number': badge_number or '',
+            'worker_id': worker_id_int,
+            'active': True,
+            'password': None,  # LDAP users don't have local passwords
+        }
+
+        try:
+            user = self.sudo().create(user_vals)
+            _logger.info(f"Created new LDAP user: {login} (ID: {user.id})")
+
+            # Sync LDAP groups to Odoo groups
+            self._sync_user_groups(user, member_of)
+
+            return user.id
+        except Exception as e:
+            _logger.error(f"Failed to create LDAP user {login}: {str(e)}")
+            return None
