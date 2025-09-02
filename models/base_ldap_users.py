@@ -177,11 +177,13 @@ class LDAPUsers(models.AbstractModel):
         users_synced = 0
         users_created = 0
         users_updated = 0
+        disabled_ou_filtered = 0
+        disabled_ou = 0
 
         try:
             with connector.ldap_connection() as conn:
                 # Use a broader search to get all users, then filter, exclud disabled OU
-                search_filter = "(&(objectClass=user)(sAMAccountName=*)(!(distinguishedName=*OU=Disabled_after_september_2025*))(!(distinguishedName=*OU=Disabled_before_september_2025*)))"
+                search_filter = "(&(objectClass=user)(sAMAccountName=*))"
 
                 results = conn.search_s(
                     config['base_dn'],
@@ -190,96 +192,7 @@ class LDAPUsers(models.AbstractModel):
                     ['sAMAccountName', 'displayName', 'mail', 'memberOf',
                      'userPrincipalName', 'employeeID', 'employeeNumber', 'distinguishedName']
                 )
-                _logger.info(f"=== LDAP SEARCH DEBUG ===")
-                _logger.info(f"Search filter used: {search_filter}")
-                _logger.info(f"Base DN: {config['base_dn']}")
-                _logger.info(f"Raw results count: {len(results)}")
 
-                valid_entries = 0
-                referrals = 0
-                no_attrs = 0
-                no_sam = 0
-                disabled_ou = 0
-                no_employee_id = 0
-                invalid_employee_id = 0
-
-                for i, entry in enumerate(results):
-                    if not isinstance(entry, tuple) or len(entry) != 2:
-                        referrals += 1
-                        continue
-
-                    dn, attrs = entry
-
-                    if not attrs or not isinstance(attrs, dict):
-                        no_attrs += 1
-                        continue
-
-                    if 'sAMAccountName' not in attrs:
-                        no_sam += 1
-                        continue
-
-                    # Check DN for disabled OU
-                    if 'Disabled_after_september_2025' in str(dn) or 'Disabled_before_september_2025' in str(dn):
-                        disabled_ou += 1
-                        _logger.debug(f"Filtered out disabled OU user: {dn}")
-                        continue
-
-                    login_raw = attrs.get('sAMAccountName', [])
-                    if login_raw:
-                        login = login_raw[0]
-                        login = login.decode('utf-8') if isinstance(login, bytes) else login
-                    else:
-                        continue
-
-                    employee_id_raw = attrs.get('employeeID', [])
-                    if not employee_id_raw:
-                        no_employee_id += 1
-                        _logger.debug(f"User {login} has no employeeID attribute")
-                        continue
-
-                    employee_id = employee_id_raw[0]
-                    employee_id = employee_id.decode('utf-8') if isinstance(employee_id, bytes) else employee_id
-
-                    if employee_id.strip().lower() in ['<not set>', 'not set', '', 'null']:
-                        invalid_employee_id += 1
-                        _logger.debug(f"User {login} has invalid employeeID: '{employee_id}'")
-                        continue
-
-                    valid_entries += 1
-                    _logger.info(f"VALID USER FOUND: {login} with employeeID: {employee_id}")
-
-                    # Only show first few valid users to avoid spam
-                    if valid_entries <= 3:
-                        _logger.info(f"Sample valid user {valid_entries}:")
-                        _logger.info(f"  DN: {dn}")
-                        _logger.info(f"  sAMAccountName: {login}")
-                        _logger.info(f"  employeeID: {employee_id}")
-                        if 'employeeNumber' in attrs:
-                            emp_num = attrs['employeeNumber'][0]
-                            emp_num = emp_num.decode('utf-8') if isinstance(emp_num, bytes) else emp_num
-                            _logger.info(f"  employeeNumber: {emp_num}")
-
-                _logger.info(f"=== FILTERING SUMMARY ===")
-                _logger.info(f"Total raw results: {len(results)}")
-                _logger.info(f"Referrals skipped: {referrals}")
-                _logger.info(f"No attributes: {no_attrs}")
-                _logger.info(f"No sAMAccountName: {no_sam}")
-                _logger.info(f"Disabled OU filtered: {disabled_ou}")
-                _logger.info(f"No employeeID: {no_employee_id}")
-                _logger.info(f"Invalid employeeID: {invalid_employee_id}")
-                _logger.info(f"VALID ENTRIES TO PROCESS: {valid_entries}")
-                _logger.info(f"=========================")
-
-                valid_entries = 0
-                referrals = 0
-                no_attrs = 0
-                no_sam = 0
-                disabled_ou = 0
-                no_employee_id = 0
-                invalid_employee_id = 0
-
-                _logger.info(f"LDAP search returned {len(results)} total results")
-                processed_count = 0
 
                 # Use the same referral filtering logic as search_user method
                 for entry in results:
@@ -292,6 +205,17 @@ class LDAPUsers(models.AbstractModel):
                     # Skip LDAP referrals and invalid entries
                     if not attrs or not isinstance(attrs, dict) or 'sAMAccountName' not in attrs:
                         continue
+
+                    distinguished_name = attrs.get('distinguishedName', [])
+                    if distinguished_name:
+                        dn_str = distinguished_name[0]
+                        dn_str = dn_str.decode('utf-8') if isinstance(dn_str, bytes) else dn_str
+                        dn_str = dn_str.upper()
+                        if ('OU=DISABLED_AFTER_SEPTEMBER_2025' in dn_str or
+                                'OU=DISABLED_BEFORE_SEPTEMBER_2025' in dn_str):
+                            disabled_ou_filtered += 1
+                            _logger.debug(f"Filtered out disabled OU user: {dn_str}")
+                            continue
 
                     login_raw = attrs.get('sAMAccountName', [])
                     employee_id_raw = attrs.get('employeeID', [])
@@ -324,16 +248,23 @@ class LDAPUsers(models.AbstractModel):
                             employee_number = int(
                                 employee_number) if employee_number and employee_number.isdigit() else None
 
-                        # ✅ FIX: Additional check for disabled OUs (double-check)
                         distinguished_name = attrs.get('distinguishedName', [])
                         if distinguished_name:
                             dn_str = distinguished_name[0]
                             dn_str = dn_str.decode('utf-8') if isinstance(dn_str, bytes) else dn_str
-                            if 'OU=Disabled_after_september_2025' in dn_str or 'OU=Disabled_before_september_2025' in dn_str:
-                                _logger.debug(f"Skipping user in disabled OU: {dn_str}")
+                            dn_str = dn_str.upper()  # Convert to uppercase for case-insensitive matching
+                            if ('OU=DISABLED_AFTER_SEPTEMBER_2025' in dn_str or
+                                    'OU=DISABLED_BEFORE_SEPTEMBER_2025' in dn_str):
+                                disabled_ou_filtered += 1  # ✅ Use the declared variable
+                                _logger.debug(f"Filtered out disabled OU user: {dn_str}")
+                                continue
+                                # Convert to uppercase for case-insensitive matching
+                            if ('OU=DISABLED_AFTER_SEPTEMBER_2025' in dn_str or
+                                    'OU=DISABLED_BEFORE_SEPTEMBER_2025' in dn_str):
+                                disabled_ou += 1
+                                _logger.debug(f"Filtered out disabled OU user: {dn}")
                                 continue
 
-                        # ✅ FIX: Search by worker_id (employeeNumber) instead of login
                         existing_user = None
                         if employee_number:
                             existing_user = self.search([('worker_id', '=', employee_number)], limit=1)
