@@ -16,7 +16,6 @@ class ResUsers(models.Model):
     tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
 
     @classmethod
-    @classmethod
     def authenticate(cls, db, credential, user_agent_env):
         """Override authenticate - this is a classmethod!"""
         login = credential.get('login')
@@ -49,26 +48,9 @@ class ResUsers(models.Model):
                     if not user:
                         connector = env['base_act.ldap.connector']
                         user_data = connector.search_user(login)
-                        if user_data and connector.authenticate_user(login, password):
-                            _logger.debug(f"[LDAP] Creating new user from LDAP")
-                            _, ldap_attrs = user_data
-                            users_model = Users.with_user(SUPERUSER_ID)
-                            user_id = users_model._sync_ldap_user(ldap_attrs, login)
-                            cr.commit()
-                            if user_id:
-                                return {
-                                    'uid': user_id,
-                                    'auth_method': 'ldap',
-                                    'mfa': 'default'
-                                }
-
-                    # If user doesn't exist, try to create from LDAP
-                    if not user:
-                        connector = env['base_act.ldap.connector']
-                        user_data = connector.search_user(login)
                         if user_data:
                             dn, attrs = user_data
-                            ldap_attrs = connector.authenticate_user(login, password)  # ✅ Use authenticate_user return
+                            ldap_attrs = connector.authenticate_user(login, password)
                             if ldap_attrs:
                                 _logger.debug(f"[LDAP] Creating new user from LDAP")
 
@@ -85,11 +67,27 @@ class ResUsers(models.Model):
                                         'auth_method': 'ldap',
                                         'mfa': 'default'
                                     }
-                        else:
-                            raise AccessDenied("Invalid LDAP credentials")
+                                else:
+                                    _logger.error(f"[LDAP] Failed to create user {login}")
+                                    raise AccessDenied("Failed to create LDAP user")
+                            else:
+                                _logger.error(f"[LDAP] Authentication failed for {login}")
+                                raise AccessDenied("Invalid LDAP credentials")
+                    elif user.is_ldap_user:
+                        connector = env['base_act.ldap.connector']
+                        ldap_attrs = connector.authenticate_user(login, password)
+                        if ldap_attrs:
+                            _logger.debug(f"[LDAP] Existing LDAP user authenticated")
+                            user.sudo()._sync_ldap_user(ldap_attrs, login)
+                            cr.commit()
+                            return {
+                                'uid': user.id,
+                                'auth_method': 'ldap',
+                                'mfa': 'default'
+                            }
 
                 except AccessDenied:
-                    raise  # Re-raise LDAP auth failures
+                    raise
                 except Exception as e:
                     _logger.error(f"[LDAP] Error during LDAP authentication: {e}")
                     # Don't break normal auth for LDAP errors - fall through
