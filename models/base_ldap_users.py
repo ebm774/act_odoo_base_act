@@ -351,7 +351,11 @@ class LDAPUsers(models.AbstractModel):
         }
 
         try:
-            user = self.sudo().create(user_vals)
+            user = self.sudo().with_context(
+                mail_create_nolog=True,  # Don't log creation
+                mail_create_nosubscribe=True,  # Don't auto-subscribe
+                tracking_disable=True  # Disable all tracking
+            ).create(user_vals)
             _logger.info(f"Created new LDAP user: {login} (ID: {user.id})")
 
             # Sync LDAP groups to Odoo groups
