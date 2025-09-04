@@ -2,6 +2,7 @@
 <odoo>
     <!-- Extend login page to add auth method selector -->
     <template id="login_auth_selector" inherit_id="web.login" name="Login Auth Selector">
+
         <!-- Add our fields at the beginning of the login form -->
         <xpath expr="//input[@name='login']/.." position="before">
             <div class="form-group field-auth-method">
@@ -106,7 +107,10 @@
         <!--        <button type="submit" name="redirect" value="/web/become" class="btn btn-link btn-sm">Log in as superuser</button> -->
         <xpath expr="//button[contains(text(), 'Log in as superuser')]" position="replace">
         </xpath>
+
+
     </template>
+
 
     <!-- Template for user selection when multiple accounts -->
     <template id="select_user" name="Select User Account">

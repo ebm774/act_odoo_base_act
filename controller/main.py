@@ -89,6 +89,7 @@ class LoginController(Home):
 
         # Default login page with auth method selector
         response = super().web_login(redirect, **kw)
+
         return response
 
     def _process_tag_login(self, login, ldap_attrs, redirect=None):
