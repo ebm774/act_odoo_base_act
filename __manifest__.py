@@ -25,7 +25,7 @@
     'version': '0.1',
 
 
-    'depends': ['base', 'web'],
+    'depends': ['base', 'web', 'auth_signup'],
 
     # always loaded
     'data': [

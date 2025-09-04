@@ -6,18 +6,18 @@
         <xpath expr="//input[@name='login']/.." position="before">
             <div class="form-group field-auth-method">
                 <label for="auth_method">Authentication Method</label>
-                <select name="auth_method" id="auth_method" class="form-control" required="required">
-                    <option value="password">Username &amp; Password</option>
-                    <option value="tag">Tag/Badge</option>
-                </select>
+                    <select name="auth_method" id="auth_method" class="form-control" required="required">
+                        <option value="tag" selected="selected">Tag/Badge</option>
+                        <option value="password">Username &amp; Password</option>
+                    </select>
             </div>
 
             <!-- Tag input field (hidden by default) -->
             <div class="form-group field-tag-number" style="display:none;">
                 <label for="tag_number">Tag Number</label>
-                <input type="text" id="tag_number" name="tag_number"
-                       class="form-control" autofocus="autofocus"
-                       placeholder="Scan your badge"/>
+                <input type="password" id="tag_number" name="tag_number"
+                   class="form-control" autofocus="autofocus"
+                   placeholder="Scan your badge" autocomplete="off"/>
             </div>
         </xpath>
 
@@ -69,9 +69,16 @@
 
                     authMethod.addEventListener('change', toggleAuthMethod);
 
+                    toggleAuthMethod();
+
                     // Handle Enter key in tag field
                     var tagInput = document.getElementById('tag_number');
                     if (tagInput) {
+                        // Remove readonly on focus to allow input
+                        tagInput.addEventListener('focus', function() {
+                            this.removeAttribute('readonly');
+                        });
+
                         tagInput.addEventListener('keypress', function(e) {
                             if (e.key === 'Enter' || e.keyCode === 13) {
                                 e.preventDefault();
@@ -81,6 +88,10 @@
                     }
                 });
             </script>
+        </xpath>
+        <!--        button to hide : -->
+        <!--        <button type="submit" name="redirect" value="/web/become" class="btn btn-link btn-sm">Log in as superuser</button> -->
+        <xpath expr="//button[contains(text(), 'Log in as superuser')]" position="replace">
         </xpath>
     </template>
 
