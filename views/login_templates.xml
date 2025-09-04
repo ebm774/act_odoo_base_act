@@ -25,6 +25,19 @@
         <xpath expr="//input[@name='login']" position="after">
             <script type="text/javascript">
                 document.addEventListener('DOMContentLoaded', function() {
+
+                // this clean the local storage of the browser, preventing the "choose a user"
+
+                    if (localStorage.getItem('web.lastConnectedUser')) {
+                        localStorage.removeItem('web.lastConnectedUser');
+                    }
+
+                    // Also clear on page unload to prevent future builds
+                    window.addEventListener('beforeunload', function() {
+                        localStorage.removeItem('web.lastConnectedUser');
+                    });
+
+
                     var authMethod = document.getElementById('auth_method');
                     if (!authMethod) return;
 
