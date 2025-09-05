@@ -279,10 +279,10 @@ class LDAPConnector(models.AbstractModel):
                 group_dn = group_dn.decode('utf-8')
 
             # Extract CN from DN for odoo_ groups
-            if 'CN=odoo_' in group_dn:
+            if 'CN=odoo' in group_dn:
                 cn_part = group_dn.split(',')[0]
                 group_name = cn_part.replace('CN=', '')
-                if group_name.startswith('odoo_'):
+                if group_name.startswith('odoo'):
                     odoo_groups.append(group_name)
 
         return odoo_groups

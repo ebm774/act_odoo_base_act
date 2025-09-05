@@ -253,17 +253,17 @@ class LDAPUsers(models.AbstractModel):
             return user.id
 
     def _sync_user_groups(self, user, member_of_list):
-        """Sync user groups from LDAP"""
+        """Sync user groups from LDAP with automatic group creation"""
         _logger.debug(f"Syncing groups for user: {user.login}")
-
-        # Get odoo groups from LDAP
-        connector = self.env['base_act.ldap.connector']
-        odoo_group_names = connector.get_odoo_groups_from_ldap(member_of_list)
 
         # Get or create group category for LDAP groups
         category = self._get_or_create_ldap_category()
 
-        # Remove user from all LDAP-managed groups
+        # Get LDAP groups starting with odoo_
+        connector = self.env['base_act.ldap.connector']
+        odoo_group_names = connector.get_odoo_groups_from_ldap(member_of_list)
+
+        # Remove user from all LDAP-managed groups first
         self._remove_user_from_ldap_groups(user, category)
 
         # Add user to current LDAP groups
@@ -279,43 +279,69 @@ class LDAPUsers(models.AbstractModel):
                 'name': 'LDAP Groups',
                 'description': 'Groups synchronized from LDAP'
             })
+            _logger.info("Created LDAP Groups category")
         return category
 
     def _remove_user_from_ldap_groups(self, user, category):
         """Remove user from all LDAP-managed groups"""
         ldap_groups = self.env['res.groups'].search([
-            ('name', '=like', 'odoo_%'),
             ('category_id', '=', category.id)
         ])
-        user.groups_id = [(3, g.id) for g in ldap_groups]
+        for group in ldap_groups:
+            user.groups_id = [(3, group.id)]
+        _logger.debug(f"Removed user {user.login} from {len(ldap_groups)} LDAP groups")
 
     def _add_user_to_ldap_groups(self, user, group_names, category):
-        """Add user to LDAP groups"""
+        """Add user to LDAP groups, creating them if necessary"""
+        added_groups = []
         for group_name in group_names:
             group = self._get_or_create_ldap_group(group_name, category)
             if group:
                 user.groups_id = [(4, group.id)]
+                added_groups.append(group_name)
+
+        if added_groups:
+            _logger.info(f"Added user {user.login} to groups: {', '.join(added_groups)}")
 
     def _get_or_create_ldap_group(self, group_name, category):
-        """Get or create LDAP group"""
+        """Get or create LDAP group with intelligent naming"""
+        # First check if group already exists
         group = self.env['res.groups'].search([
             ('name', '=', group_name)
         ], limit=1)
 
         if not group:
-            # Parse group name for module and rights
-            # Format: odoo_[module]_[rights]
+            # Parse group name for better description
+            # Format: odoo_[module]_[rights] -> Module: Rights
             parts = group_name.split('_')
             if len(parts) >= 3:
-                module_name = parts[1]
-                rights = '_'.join(parts[2:])
+                module_name = parts[1].title()  # Capitalize module name
+                rights = '_'.join(parts[2:]).replace('_', ' ').title()
 
-                group = self.env['res.groups'].create({
+                group_vals = {
                     'name': group_name,
                     'category_id': category.id,
                     'comment': f'LDAP Group: {module_name} - {rights}'
-                })
-                _logger.info(f"Created LDAP group: {group_name}")
+                }
+
+                try:
+                    group = self.env['res.groups'].create(group_vals)
+                    _logger.info(f"Created LDAP group: {group_name} ({module_name} - {rights})")
+                except Exception as e:
+                    _logger.error(f"Failed to create group {group_name}: {e}")
+                    return None
+            else:
+                # Fallback for non-standard naming
+                try:
+                    group = self.env['res.groups'].create({
+                        'name': group_name,
+                        'category_id': category.id,
+                        'comment': f'LDAP Group: {group_name}'
+                    })
+                    _logger.info(f"Created LDAP group: {group_name}")
+                except Exception as e:
+                    _logger.error(f"Failed to create group {group_name}: {e}")
+                    return None
 
         return group
 
