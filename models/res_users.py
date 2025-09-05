@@ -144,3 +144,5 @@ class ResUsers(models.Model):
         # ✅ THIRD: Fallback to standard authentication for non-LDAP users
         _logger.debug(f"[DEBUG] Using standard Odoo authentication")
         return super()._check_credentials(password, user_agent_env)
+
+

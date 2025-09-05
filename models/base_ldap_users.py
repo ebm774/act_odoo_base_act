@@ -101,9 +101,22 @@ class LDAPUsers(models.AbstractModel):
         else:
             _logger.info(f"Updating existing user {ldap_login}")
             try:
-                user.write(user_vals)
-                _logger.info(f"Updated LDAP user: {ldap_login}")
-                self._sync_user_groups(user, member_of)
+
+
+                user_with_context = user.sudo().with_context(
+                    mail_notrack=True,
+                    tracking_disable=True,
+                    no_login_notification=True,
+                    skip_password_notification=True
+                )
+
+
+                user_with_context.write(user_vals)
+                _logger.info(f"Updated LDAP user: {login}")
+
+
+                self._sync_user_groups(user_with_context, member_of)
+
                 return user.id
             except Exception as e:
                 _logger.error(f"Failed to update user {ldap_login}: {e}")
