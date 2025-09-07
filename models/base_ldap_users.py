@@ -376,13 +376,20 @@ class LDAPUsers(models.AbstractModel):
             # Process each entry
             for entry in ldap_entries:
                 self._process_ldap_entry_for_sync(entry, stats)
-
             self.env.cr.commit()
             self._log_sync_results(stats)
 
         except Exception as e:
             _logger.error(f"CRON LDAP sync error: {str(e)}")
             self.env.cr.rollback()
+
+        # After all users and groups are synced, setup module permissions
+        try:
+            _logger.info("Starting LDAP module permissions setup...")
+            self._setup_ldap_module_permissions()
+            _logger.info("LDAP module permissions setup completed")
+        except Exception as e:
+            _logger.error(f"Failed to setup module permissions during LDAP sync: {e}")
 
     def _is_ldap_enabled(self):
         """Check if LDAP is enabled"""
@@ -486,3 +493,166 @@ class LDAPUsers(models.AbstractModel):
             f"{stats['non_odoo_group_filtered']} non-odoo group, "
             f"{stats['invalid_employee_id_filtered']} invalid employee ID"
         )
+
+    def _setup_ldap_module_permissions(self):
+        """Setup module permissions for all LDAP groups following odoo_{module}_user pattern
+
+        Process:
+        1. Find all groups matching 'odoo_{module_name}_user'
+        2. Extract module name and get first 3 letters
+        3. Find all models starting with those 3 letters
+        4. Grant full access (except delete) to users in those groups
+        """
+        _logger.info("Setting up module permissions for LDAP groups...")
+
+        try:
+            # Step 1: Get all groups matching the pattern odoo_{module}_user
+            ldap_groups = self.env['res.groups'].search([
+                ('name', '=like', 'odoo_%_user')
+            ])
+
+            _logger.info(f"Found {len(ldap_groups)} LDAP groups matching pattern 'odoo_*_user'")
+
+            for group in ldap_groups:
+                self._process_ldap_group_permissions(group)
+
+            _logger.info(f"Completed permission setup for {len(ldap_groups)} LDAP groups")
+
+        except Exception as e:
+            _logger.error(f"Failed to setup LDAP module permissions: {e}")
+
+    def _process_ldap_group_permissions(self, group):
+        """Process permissions for a single LDAP group"""
+
+        group_name = group.name
+        _logger.info(f"Processing permissions for group: {group_name}")
+
+        # Step 2: Extract module name from group name
+        module_name = self._extract_module_name_from_group(group_name)
+        if not module_name:
+            _logger.warning(f"Could not extract module name from group: {group_name}")
+            return
+
+        # Step 3: Get first 3 letters of module name
+        module_prefix = module_name[:3]
+        _logger.info(f"Module '{module_name}' -> searching for models with prefix '{module_prefix}.*'")
+
+        # Step 4: Find all models starting with the 3-letter prefix
+        matching_models = self._find_models_by_prefix(module_prefix)
+
+        if not matching_models:
+            _logger.warning(f"No models found with prefix '{module_prefix}' for module '{module_name}'")
+            return
+
+        # Step 5: Grant permissions to all matching models
+        self._grant_permissions_to_models(group, matching_models, module_name)
+
+    def _extract_module_name_from_group(self, group_name):
+        """Extract module name from LDAP group name
+
+        Input: 'odoo_order_user' -> Output: 'order'
+        Input: 'odoo_inventory_user' -> Output: 'inventory'
+        Input: 'odoo_stock_account_user' -> Output: 'stock_account'
+        """
+
+        # Check pattern: odoo_{module}_user
+        if not group_name.startswith('odoo_') or not group_name.endswith('_user'):
+            return None
+
+        # Extract middle part
+        parts = group_name.split('_')
+        if len(parts) < 3:
+            return None
+
+        # Everything between 'odoo_' and '_user'
+        module_name = '_'.join(parts[1:-1])
+
+        _logger.debug(f"Extracted module name '{module_name}' from group '{group_name}'")
+        return module_name
+
+    def _find_models_by_prefix(self, prefix):
+        """Find all Odoo models starting with the given 3-letter prefix
+
+        Args:
+            prefix (str): 3-letter prefix (e.g., 'ord', 'sto', 'pur')
+
+        Returns:
+            recordset: ir.model records matching the prefix
+        """
+
+        # Search for models with pattern: {prefix}.%
+        models = self.env['ir.model'].search([
+            ('model', '=like', f'{prefix}.%')
+        ])
+
+        model_names = models.mapped('model')
+        _logger.info(f"Found {len(models)} models with prefix '{prefix}': {model_names}")
+
+        return models
+
+    def _grant_permissions_to_models(self, group, models, module_name):
+        """Grant full access (except delete) permissions to group for all models
+
+        Args:
+            group (res.groups): The LDAP group
+            models (ir.model recordset): Models to grant access to
+            module_name (str): Module name for logging
+        """
+
+        permissions = (1, 1, 1, 0)  # read, write, create, no delete
+        created_rules = 0
+        updated_rules = 0
+
+        for model in models:
+            try:
+                rule_created = self._create_or_update_model_access(group, model, permissions)
+                if rule_created:
+                    created_rules += 1
+                else:
+                    updated_rules += 1
+
+            except Exception as e:
+                _logger.error(f"Failed to grant permissions for model {model.model} to group {group.name}: {e}")
+
+        _logger.info(
+            f"Module '{module_name}' permissions: {created_rules} rules created, {updated_rules} rules updated for group '{group.name}'")
+
+    def _create_or_update_model_access(self, group, model, permissions):
+        """Create or update access rule for a specific model and group
+
+        Args:
+            group (res.groups): The group to grant access to
+            model (ir.model): The model to grant access for
+            permissions (tuple): (read, write, create, unlink) permissions
+
+        Returns:
+            bool: True if created new rule, False if updated existing
+        """
+
+        # Check if access rule already exists
+        existing_rule = self.env['ir.model.access'].search([
+            ('model_id', '=', model.id),
+            ('group_id', '=', group.id)
+        ], limit=1)
+
+        # Prepare rule data
+        rule_vals = {
+            'name': f'{model.model}.ldap.user',
+            'model_id': model.id,
+            'group_id': group.id,
+            'perm_read': permissions[0],
+            'perm_write': permissions[1],
+            'perm_create': permissions[2],
+            'perm_unlink': permissions[3]
+        }
+
+        if existing_rule:
+            # Update existing rule
+            existing_rule.write(rule_vals)
+            _logger.debug(f"Updated access rule for {model.model} -> {group.name}")
+            return False
+        else:
+            # Create new rule
+            self.env['ir.model.access'].create(rule_vals)
+            _logger.debug(f"Created access rule for {model.model} -> {group.name}")
+            return True
