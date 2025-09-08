@@ -9,11 +9,12 @@ _logger = logging.getLogger(__name__)
 
 
 class ResUsers(models.Model):
-    _name = 'res.users'
+    _name='res.users'
     _inherit = ['res.users', 'base_act.ldap.users']
 
     tag_auth_token = fields.Char('Tag Auth Token', copy=False)
     tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
+    department_id = fields.Many2one('base_act.department', string='Department')
 
     @classmethod
     def authenticate(cls, db, credential, user_agent_env):

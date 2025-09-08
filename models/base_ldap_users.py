@@ -1,20 +1,3 @@
-def _is_user_in_odoo_group(self, member_of_list):
-    """Check if user is member of the specific 'odoo' group"""
-    if not member_of_list:
-        return False
-
-    target_group = "CN=odoo,CN=Builtin,DC=autocontrole,DC=be"
-
-    for group_dn in member_of_list:
-        group_dn_str = group_dn.decode('utf-8') if isinstance(group_dn, bytes) else group_dn
-
-        # Direct string comparison (case sensitive)
-        if group_dn_str == target_group:
-            return True
-
-    return False  # -*- coding: utf-8 -*-
-
-
 import ldap
 from odoo import models, fields, api, SUPERUSER_ID, _
 import logging
@@ -34,7 +17,7 @@ class LDAPUsers(models.AbstractModel):
     is_ldap_user = fields.Boolean('LDAP User', default=False)
     badge_number = fields.Char('Badge Number')
     worker_id = fields.Integer('Worker Number')
-    email = fields.Char('Email')
+    # email = fields.Char('Email')
 
     # ===================================================================
     # HELPER METHODS - Reusable utility functions
@@ -295,13 +278,37 @@ class LDAPUsers(models.AbstractModel):
         """Add user to LDAP groups, creating them if necessary"""
         added_groups = []
         for group_name in group_names:
-            group = self._get_or_create_ldap_group(group_name, category)
-            if group:
-                user.groups_id = [(4, group.id)]
-                added_groups.append(group_name)
+            if group_name.endswith('_department'):
+                department = self._get_or_create_ldap_department(group_name, category)
+                if department:
+                    user.department_id = department.id
+                    added_groups.append(group_name)
+
+            else:
+                group = self._get_or_create_ldap_group(group_name, category)
+                if group:
+                    user.groups_id = [(4, group.id)]
+                    added_groups.append(group_name)
 
         if added_groups:
             _logger.info(f"Added user {user.login} to groups: {', '.join(added_groups)}")
+
+    def _get_or_create_ldap_department(self, group_name, category):
+        """Get or create LDAP department with intelligent naming"""
+        dept_name = group_name[5:-11] # Remove 'odoo_' and '_department'
+        department = self.env['base_act.department'].search([
+            ('name', '=', dept_name)
+        ], limit=1)
+
+        if not department:
+
+            # Format: odoo_[department_name]_department
+            department = self.env['base_act.department'].create({
+                'name': dept_name})
+
+
+
+        return department
 
     def _get_or_create_ldap_group(self, group_name, category):
         """Get or create LDAP group with intelligent naming"""
@@ -310,7 +317,7 @@ class LDAPUsers(models.AbstractModel):
             ('name', '=', group_name)
         ], limit=1)
 
-        if not group:
+        if not group :
             # Parse group name for better description
             # Format: odoo_[module]_[rights] -> Module: Rights
             parts = group_name.split('_')
