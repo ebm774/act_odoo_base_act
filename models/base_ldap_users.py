@@ -394,6 +394,7 @@ class LDAPUsers(models.AbstractModel):
         try:
             _logger.info("Starting LDAP module permissions setup...")
             self._setup_ldap_module_permissions()
+            self.env['ldap.permission.manager'].setup_cross_module_permissions()
             _logger.info("LDAP module permissions setup completed")
         except Exception as e:
             _logger.error(f"Failed to setup module permissions during LDAP sync: {e}")
