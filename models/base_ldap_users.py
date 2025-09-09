@@ -223,6 +223,14 @@ class LDAPUsers(models.AbstractModel):
         """Update existing LDAP user"""
         _logger.info(f"Updating existing user {login}")
 
+        #check if odoo match LDAP :
+        needs_user_update = self._check_user_fields_changed(user, user_vals)
+        needs_group_update = self._check_user_groups_changed(user, member_of)
+
+        if not needs_user_update and not needs_group_update:
+            _logger.debug(f"No changes needed for user {login}")
+            return user.id
+
         try:
             context = self._get_sync_context(for_cron=False)
             user_with_context = user.sudo().with_context(**context)
@@ -234,6 +242,96 @@ class LDAPUsers(models.AbstractModel):
         except Exception as e:
             _logger.error(f"Failed to update user {login}: {e}")
             return user.id
+
+    def _check_user_fields_changed(self, user, user_vals):
+        """Check if user record fields need updating by comparing current vs new values"""
+
+        # Fields to compare (excluding relational fields like groups_id)
+        fields_to_check = ['name', 'email', 'badge_number', 'worker_id', 'ldap_uid']
+
+        for field in fields_to_check:
+            if field not in user_vals:
+                continue
+
+            current_value = getattr(user, field, None)
+            new_value = user_vals[field]
+
+            # Handle different data types properly
+            if field == 'worker_id':
+                # Convert both to int for comparison
+                current_int = int(current_value) if current_value else 0
+                new_int = int(new_value) if new_value else 0
+                if current_int != new_int:
+                    _logger.debug(f"Field {field} changed: {current_int} → {new_int}")
+                    return True
+            else:
+                # String comparison (handle None/empty)
+                current_str = str(current_value) if current_value else ""
+                new_str = str(new_value) if new_value else ""
+                if current_str != new_str:
+                    _logger.debug(f"Field {field} changed: '{current_str}' → '{new_str}'")
+                    return True
+
+        _logger.debug(f"No field changes detected for user {user.login}")
+        return False
+
+    def _check_user_fields_changed(self, user, user_vals):
+        """Check if user record fields need updating by comparing current vs new values"""
+
+        # Fields to compare (excluding relational fields like groups_id)
+        fields_to_check = ['name', 'email', 'badge_number', 'worker_id', 'ldap_uid']
+
+        for field in fields_to_check:
+            if field not in user_vals:
+                continue
+
+            current_value = getattr(user, field, None)
+            new_value = user_vals[field]
+
+            # Handle different data types properly
+            if field == 'worker_id':
+                # Convert both to int for comparison
+                current_int = int(current_value) if current_value else 0
+                new_int = int(new_value) if new_value else 0
+                if current_int != new_int:
+                    _logger.debug(f"Field {field} changed: {current_int} → {new_int}")
+                    return True
+            else:
+                # String comparison (handle None/empty)
+                current_str = str(current_value) if current_value else ""
+                new_str = str(new_value) if new_value else ""
+                if current_str != new_str:
+                    _logger.debug(f"Field {field} changed: '{current_str}' → '{new_str}'")
+                    return True
+
+        _logger.debug(f"No field changes detected for user {user.login}")
+        return False
+
+    def _check_user_groups_changed(self, user, member_of_list):
+        """Check if user's LDAP groups need updating"""
+
+        # Get current LDAP group names for this user
+        ldap_category = self._get_or_create_ldap_category()
+        current_ldap_groups = user.groups_id.filtered(
+            lambda g: g.category_id.id == ldap_category.id
+        ).mapped('name')
+
+        # Get target LDAP group names from LDAP
+        connector = self.env['base_act.ldap.connector']
+        target_ldap_groups = connector.get_odoo_groups_from_ldap(member_of_list)
+
+        # Compare sets
+        current_set = set(current_ldap_groups)
+        target_set = set(target_ldap_groups)
+
+        if current_set != target_set:
+            added = target_set - current_set
+            removed = current_set - target_set
+            _logger.debug(f"Group changes for {user.login}: +{added}, -{removed}")
+            return True
+
+        _logger.debug(f"No group changes needed for user {user.login}")
+        return False
 
     def _sync_user_groups(self, user, member_of_list):
         """Sync user groups from LDAP with automatic group creation"""
@@ -371,6 +469,7 @@ class LDAPUsers(models.AbstractModel):
             'users_synced': 0,
             'users_created': 0,
             'users_updated': 0,
+            'users_skipped': 0,
             'disabled_ou_filtered': 0,
             'non_odoo_group_filtered': 0,
             'invalid_employee_id_filtered': 0,
@@ -465,11 +564,23 @@ class LDAPUsers(models.AbstractModel):
             existing_user = self._find_existing_user(login, employee_number)
 
             if existing_user:
-                # Update existing user
-                context = self._get_sync_context(for_cron=True)
-                existing_user.sudo().with_context(**context)._sync_ldap_user(attrs, login)
-                stats['users_updated'] += 1
-                _logger.info(f"Updated LDAP user: {login}")
+                # Check if update is needed
+                user_vals = self._prepare_user_values(attrs, login)
+                member_of = attrs.get('memberOf', [])
+
+                needs_user_update = self._check_user_fields_changed(existing_user, user_vals)
+                needs_group_update = self._check_user_groups_changed(existing_user, member_of)
+
+                if needs_user_update or needs_group_update:
+                    # Update existing user
+                    context = self._get_sync_context(for_cron=True)
+                    existing_user.sudo().with_context(**context)._sync_ldap_user(attrs, login)
+                    stats['users_updated'] += 1
+                    _logger.info(f"Updated LDAP user: {login}")
+                else:
+                    # User exists but no changes needed
+                    stats['users_skipped'] += 1
+                    _logger.debug(f"Skipped LDAP user (no changes): {login}")
             else:
                 # Create new user
                 context = self._get_sync_context(for_cron=True)
@@ -497,6 +608,7 @@ class LDAPUsers(models.AbstractModel):
         _logger.info(
             f"LDAP sync completed: {stats['users_synced']} total, "
             f"{stats['users_created']} created, {stats['users_updated']} updated. "
+            f"{stats['users_skipped']} skipped (no changes). "
             f"Filtered: {stats['disabled_ou_filtered']} disabled OU, "
             f"{stats['non_odoo_group_filtered']} non-odoo group, "
             f"{stats['invalid_employee_id_filtered']} invalid employee ID"
