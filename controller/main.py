@@ -23,38 +23,46 @@ class LoginController(Home):
             tag_number = kw.get('tag_number', '').strip()
 
             if tag_number and tag_number.isdigit():
-                # Search for users with this tag
-                connector = request.env['base_act.ldap.connector'].sudo()
-                matching_users = connector.search_users_by_tag(tag_number)
+                try:
+                    # Search for users with this tag
+                    connector = request.env['base_act.ldap.connector'].sudo()
+                    matching_users = connector.search_users_by_tag(tag_number)
 
 
-                if len(matching_users) == 1:
-                    # Single user found - authenticate directly
-                    dn, attrs = matching_users[0]
+                    if len(matching_users) == 1:
 
-                    login = attrs.get('sAMAccountName', [b''])[0].decode('utf-8')
-                    # Auto-login with tag (create session without password)
-                    return self._process_tag_login(login, attrs, redirect)
 
-                else:
-                    # No user or more than one user found
+                        # Single user found - authenticate directly
+                        dn, attrs = matching_users[0]
+
+                        login = attrs.get('sAMAccountName', [b''])[0].decode('utf-8')
+
+
+                        # Auto-login with tag (create session without password)
+                        return self._process_tag_login(login, attrs, redirect)
+
+                    elif len(matching_users) == 0:
+                        _logger.warning(f"Tag authentication failed: No user found for tag {tag_number}")
+                        error_message = "Invalid tag number. Please check your tag or use password login."
+                        return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
+
+                    else:
+                        # Multiple users found - this shouldn't happen but let's handle it
+                        _logger.warning(f"Tag authentication: Multiple users found for tag {tag_number}")
+                        error_message = "Multiple users found for this tag. Please contact your administrator."
+                        return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
+
+                except Exception as e:
+                    _logger.error(f"Tag authentication error: {e}")
                     values = request.params.copy()
                     values['error'] = _(
-                        "Invalid tag number or authentication system temporarily unavailable. Please try again or use password login.")
+                        "Authentication system temporarily unavailable. Please try password login or contact support.")
                     return request.render('web.login', values)
-
-        # Handle user selection from multiple accounts
-        if request.httprequest.method == 'POST' and kw.get('selected_user'):
-            selected_login = kw.get('selected_user')
-            redirect = request.session.get('redirect')
-
-            # Get user data and process login
-            connector = request.env['base_act.ldap.connector'].sudo()
-            user_data = connector.search_user(selected_login)
-
-            if user_data:
-                dn, attrs = user_data
-                return self._process_tag_login(selected_login, attrs, redirect)
+            else:
+                _logger.warning(f"Tag authentication failed: Invalid tag format '{tag_number}'")
+                values = request.params.copy()
+                values['error'] = _("Invalid tag format. Please scan a valid tag or use password login.")
+                return request.render('web.login', values)
 
         # Default login page with auth method selector
         response = super().web_login(redirect, **kw)
