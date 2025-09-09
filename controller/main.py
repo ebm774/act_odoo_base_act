@@ -30,14 +30,9 @@ class LoginController(Home):
 
 
                     if len(matching_users) == 1:
-
-
                         # Single user found - authenticate directly
                         dn, attrs = matching_users[0]
-
                         login = attrs.get('sAMAccountName', [b''])[0].decode('utf-8')
-
-
                         # Auto-login with tag (create session without password)
                         return self._process_tag_login(login, attrs, redirect)
 
@@ -122,6 +117,9 @@ class LoginController(Home):
                     _logger.info("Restored user settings")
 
                     return request.redirect(redirect or '/web')
+            else:
+                error_message = "You tag does not give you access to this software, please contact your system administrator."
+                return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
 
 
         except Exception as e:
