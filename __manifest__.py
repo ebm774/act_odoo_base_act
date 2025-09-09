@@ -36,7 +36,8 @@
         'data/ir_cron.xml',
 
         # Controller
-        'views/login_templates.xml'
+        'views/login_templates.xml',
+        'views/custom_views.xml',
 
 
 
