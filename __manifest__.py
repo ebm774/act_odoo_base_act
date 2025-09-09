@@ -26,6 +26,14 @@
 
 
     'depends': ['base', 'web', 'auth_signup'],
+    'assets': {
+        'web.assets_frontend': [
+            'base_act/static/src/scss/login.scss',
+        ],
+        'web.assets_backend': [
+            'base_act/static/src/scss/navbar.scss',
+        ],
+    },
 
     # always loaded
     'data': [
@@ -39,9 +47,11 @@
         'views/login_templates.xml',
         'views/custom_views.xml',
 
-
-
     ],
+
+
+
+
     'demo': [],
     'installable': True,
     'application': False,

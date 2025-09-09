@@ -1,0 +1,5 @@
+.oe_login_buttons .btn.btn-primary {
+    --btn-bg: #70B5FF;   /* custom CSS variable */
+    background-color: var(--btn-bg) !important;
+    border-color: var(--btn-bg) !important;
+}

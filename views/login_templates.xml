@@ -103,12 +103,8 @@
                 });
             </script>
         </xpath>
-        <!--        button to hide : -->
-        <!--        <button type="submit" name="redirect" value="/web/become" class="btn btn-link btn-sm">Log in as superuser</button> -->
         <xpath expr="//button[contains(text(), 'Log in as superuser')]" position="replace">
         </xpath>
-
-
     </template>
 
 

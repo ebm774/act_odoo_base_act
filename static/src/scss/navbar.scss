@@ -1,0 +1,107 @@
+/* ===============================
+   default navbar
+   =============================== */
+
+.o_navbar,
+.o_main_navbar {
+  --navbar-bg: #70B5FF;
+  background-color: var(--navbar-bg) !important;
+  border-color: var(--navbar-bg) !important
+}
+  /* Optional: change text/icon colors if needed */
+.o_navbar .o_menu_brand,
+.o_navbar .o_dropdown button,
+.o_navbar .fa,
+.o_navbar .oi {
+    color: #ffffff !important;  /* white text/icons */
+}
+
+/*now this is for the menu in the navbar of the custom modules*/
+
+/* ===============================
+   Module Menu Tabs (inside navbar)
+   =============================== */
+/* Normal (idle) state - UPDATED to include both buttons AND anchors */
+.o_web_client .o_main_navbar .o_menu_sections button,
+.o_web_client .o_main_navbar .o_menu_sections a.o-dropdown-item,
+.o_web_client .o_main_navbar .o_menu_sections .dropdown-toggle a.o-dropdown-item:nth-child(1) {
+    background-color: #70B5FF !important;
+    border-color: #70B5FF !important;
+    color: #fff !important;
+}
+
+/* Hover state: lighter - UPDATED */
+.o_web_client .o_main_navbar .o_menu_sections button:hover,
+.o_web_client .o_main_navbar .o_menu_sections a.o-dropdown-item:hover,
+.o_web_client .o_main_navbar .o_menu_sections .dropdown-toggle:hover {
+    background-color: #8cc9ff !important;   /* lighter blue */
+    border-color: #8cc9ff !important;
+    color: #fff !important;
+}
+
+/* Active/selected state: darker - UPDATED */
+.o_web_client .o_main_navbar .o_menu_sections button.active,
+.o_web_client .o_main_navbar .o_menu_sections button:focus,
+.o_web_client .o_main_navbar .o_menu_sections a.o-dropdown-item:focus,
+.o_web_client .o_main_navbar .o_menu_sections a.o-dropdown-item:active,
+.o_web_client .o_main_navbar .o_menu_sections .dropdown-toggle[aria-expanded="true"] {
+    background-color: #4da8ff !important;
+    border-color: #4da8ff !important;
+    color: #fff !important;
+    box-shadow: none !important;
+}
+
+/* ===============================
+   button inside the module
+   =============================== */
+
+
+.o_web_client .btn.btn-primary {
+    --btn-bg: #70B5FF;
+    --btn-border-color: #70B5FF;
+    --btn-hover-bg: #4da8ff;       /* optional hover shade */
+    --btn-hover-border-color: #4da8ff;
+    --btn-active-bg: #3399ff;      /* optional active shade */
+    --btn-active-border-color: #3399ff;
+
+    background-color: var(--btn-bg) !important;
+    border-color: var(--btn-border-color) !important;
+    color: #fff !important;
+}
+
+/* Ensure icons inside buttons stay white */
+.o_web_client .btn.btn-primary i {
+    color: #fff !important;
+}
+
+.o_web_client .o_main_navbar .o_menu_sections button.active,
+.o_web_client .o_main_navbar .o_menu_sections button:focus,
+.o_web_client .o_main_navbar .o_menu_sections button[aria-expanded="true"] {
+    background-color: #70B5FF !important;
+    border-color: #70B5FF !important;
+    color: #fff !important;
+    box-shadow: none !important;   /* remove Odoo purple glow */
+}
+
+
+/* ===============================
+   Hide system menu in systray
+   =============================== */
+.o-mail-DiscussSystray-class {
+    display: none !important;
+}
+button.o-dropdown.dropdown-toggle:has(.fa-clock-o) {
+    display: none !important;
+}
+
+
+/* ===============================
+   Hide first 4 items from user dropdown menu
+   =============================== */
+.o_popover.dropdown-menu .o-dropdown-item[data-menu="documentation"],
+.o_popover.dropdown-menu .o-dropdown-item[data-menu="support"],
+.o_popover.dropdown-menu .o-dropdown-item[data-menu="shortcuts"],
+.o_popover.dropdown-menu .o-dropdown-item[data-menu="web_tour.tour_enabled"],
+.dropdown-divider {
+    display: none !important;
+}

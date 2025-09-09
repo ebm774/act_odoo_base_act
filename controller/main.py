@@ -36,42 +36,11 @@ class LoginController(Home):
                     # Auto-login with tag (create session without password)
                     return self._process_tag_login(login, attrs, redirect)
 
-                elif len(matching_users) > 1:
-                    # Multiple users found - show selection
-                    users_list = []
-                    for dn, attrs in matching_users:
-                        display_name = attrs.get('displayName', [b''])[0]
-                        if isinstance(display_name, bytes):
-                            display_name = display_name.decode('utf-8')
-
-                        login = attrs.get('SamAccountName', [b''])[0]
-                        if isinstance(login, bytes):
-                            login = login.decode('utf-8')
-
-                        users_list.append({
-                            'login': login,
-                            'display_name': display_name or login
-                        })
-
-                    # Store in session
-                    request.session['tag_users'] = users_list
-                    request.session['tag_number'] = tag_number
-                    request.session['redirect'] = redirect
-
-                    # Use a simpler rendering approach
-                    response = request.make_response(request.env['ir.ui.view']._render_template(
-                        'base_act.select_user',
-                        {
-                            'tag_users': users_list,
-                            'csrf_token': request.csrf_token(),
-                        }
-                    ))
-                    return response
-
                 else:
-                    # No user found
+                    # No user or more than one user found
                     values = request.params.copy()
-                    values['error'] = _("No user found with this tag number")
+                    values['error'] = _(
+                        "Invalid tag number or authentication system temporarily unavailable. Please try again or use password login.")
                     return request.render('web.login', values)
 
         # Handle user selection from multiple accounts
@@ -101,64 +70,53 @@ class LoginController(Home):
             user = users.search([('login', '=', login)], limit=1)
             _logger.info(f"login : {login}")
 
-            if not user:
-                _logger.info("Creating new user from LDAP")
-                company = request.env.company or request.env['res.company'].sudo().search([], limit=1)
-                user_id = users.with_company(company)._sync_ldap_user(ldap_attrs, login)
-                if not user_id:
-                    raise ValueError("Failed to create user")
-                user = users.browse(user_id)
-            else:
+            if user :
                 _logger.info("Updating existing user")
                 user._sync_ldap_user(ldap_attrs, login)
 
-            request.env.cr.commit()
-            _logger.info("User sync completed")
-
-            # Generate temporary password and temporarily disable LDAP
-            temp_password = secrets.token_urlsafe(32)
-            _logger.info("Generated temp password")
-
-            user.sudo().write({
-                'password': temp_password,
-                'is_ldap_user': False,
-            })
-            _logger.info("Updated user with temp password")
-            request.env.cr.commit()
-            _logger.info("Committed temp password")
-
-            # Authenticate normally (server-side API expects positional args)
-            _logger.info("About to call session.authenticate")
-            _logger.info("db name is : %s", request.db)
-
-            credential = {
-                'type': 'password',  # required by Odoo
-                'login': login,  # the user login you found
-                'password': temp_password,  # placeholder; won’t be used if you short-circuit
-            }
-
-            uid = request.session.authenticate(request.db, credential)
-            _logger.info(f"Authentication returned: {uid}")
-
-            if uid:
-                _logger.info("Authentication successful via temp password")
-                # Re-enable LDAP and clear password
-                user.sudo().write({
-                    'password': '',
-                    'is_ldap_user': True,
-                })
                 request.env.cr.commit()
-                _logger.info("Restored user settings")
+                _logger.info("User sync completed")
 
-                return request.redirect(redirect or '/web')
+                # Generate temporary password and temporarily disable LDAP
+                temp_password = secrets.token_urlsafe(32)
+                _logger.info("Generated temp password")
 
-            raise ValueError("Authentication failed")
+                user.sudo().write({
+                    'password': temp_password,
+                    'is_ldap_user': False,
+                })
+                _logger.info("Updated user with temp password")
+                request.env.cr.commit()
+                _logger.info("Committed temp password")
+
+
+                # Authenticate normally (server-side API expects positional args)
+                _logger.info("About to call session.authenticate")
+                _logger.info("db name is : %s", request.db)
+
+                credential = {
+                    'type': 'password',  # required by Odoo
+                    'login': login,  # the user login you found
+                    'password': temp_password,  # placeholder; won’t be used if you short-circuit
+                }
+
+                uid = request.session.authenticate(request.db, credential)
+                _logger.info(f"Authentication returned: {uid}")
+
+                if uid:
+                    _logger.info("Authentication successful via temp password")
+                    # Re-enable LDAP and clear password
+                    user.sudo().write({
+                        'password': '',
+                        'is_ldap_user': True,
+                    })
+                    request.env.cr.commit()
+                    _logger.info("Restored user settings")
+
+                    return request.redirect(redirect or '/web')
+
 
         except Exception as e:
-            _logger.error(f"Tag login error: {e}")
-            _logger.error(f"Error type: {type(e)}")
-            import traceback
-            _logger.error(f"Full traceback: {traceback.format_exc()}")
             request.env.cr.rollback()
             values = request.params.copy()
             values['error'] = _("Authentication failed: Unable to create or access user account")
