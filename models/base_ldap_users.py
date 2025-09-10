@@ -256,50 +256,43 @@ class LDAPUsers(models.AbstractModel):
             current_value = getattr(user, field, None)
             new_value = user_vals[field]
 
-            # Handle different data types properly
+            # Normalize values for comparison
             if field == 'worker_id':
-                # Convert both to int for comparison
-                current_int = int(current_value) if current_value else 0
-                new_int = int(new_value) if new_value else 0
+                # Both should be integers
+                current_int = int(current_value) if current_value and str(current_value).isdigit() else 0
+                new_int = int(new_value) if new_value and str(new_value).isdigit() else 0
                 if current_int != new_int:
                     _logger.debug(f"Field {field} changed: {current_int} → {new_int}")
                     return True
-            else:
-                # String comparison (handle None/empty)
-                current_str = str(current_value) if current_value else ""
-                new_str = str(new_value) if new_value else ""
-                if current_str != new_str:
-                    _logger.debug(f"Field {field} changed: '{current_str}' → '{new_str}'")
+
+            elif field == 'badge_number':
+                # Badge number could be integer or string
+                current_val = str(current_value) if current_value not in [None, False, 0, '0'] else ''
+                new_val = str(new_value) if new_value not in [None, False, 0, '0'] else ''
+                if current_val != new_val:
+                    _logger.debug(f"Field {field} changed: '{current_val}' → '{new_val}'")
                     return True
 
-        _logger.debug(f"No field changes detected for user {user.login}")
-        return False
-
-    def _check_user_fields_changed(self, user, user_vals):
-        """Check if user record fields need updating by comparing current vs new values"""
-
-        # Fields to compare (excluding relational fields like groups_id)
-        fields_to_check = ['name', 'email', 'badge_number', 'worker_id', 'ldap_uid']
-
-        for field in fields_to_check:
-            if field not in user_vals:
-                continue
-
-            current_value = getattr(user, field, None)
-            new_value = user_vals[field]
-
-            # Handle different data types properly
-            if field == 'worker_id':
-                # Convert both to int for comparison
-                current_int = int(current_value) if current_value else 0
-                new_int = int(new_value) if new_value else 0
-                if current_int != new_int:
-                    _logger.debug(f"Field {field} changed: {current_int} → {new_int}")
+            elif field == 'email':
+                # Email comparison should be case-insensitive and trimmed
+                current_email = (current_value or '').strip().lower()
+                new_email = (new_value or '').strip().lower()
+                if current_email != new_email:
+                    _logger.debug(f"Field {field} changed: '{current_email}' → '{new_email}'")
                     return True
+
             else:
-                # String comparison (handle None/empty)
-                current_str = str(current_value) if current_value else ""
-                new_str = str(new_value) if new_value else ""
+                # Generic string comparison for name and ldap_uid
+                # Handle None, False, and empty string as equivalent
+                current_str = str(current_value).strip() if current_value not in [None, False, ''] else ''
+                new_str = str(new_value).strip() if new_value not in [None, False, ''] else ''
+
+                # Avoid comparing 'False' or 'None' as strings
+                if current_value is False or current_value is None:
+                    current_str = ''
+                if new_value is False or new_value is None:
+                    new_str = ''
+
                 if current_str != new_str:
                     _logger.debug(f"Field {field} changed: '{current_str}' → '{new_str}'")
                     return True
