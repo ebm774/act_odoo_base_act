@@ -8,6 +8,8 @@ class BaseDepartment(models.Model):
     # _inherit = 'res.groups'
     _rec_name = 'name'
     name = fields.Char('Department Name', required=True)
+
+    #cf res_users column "department" in DB
     user_ids = fields.Many2many(
         'res.users',
         'base_act_department_users_rel',

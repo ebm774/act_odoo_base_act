@@ -1,0 +1,14 @@
+.o_user_info_systray {
+    .text-white {
+        color: #ffffff !important;
+    }
+
+    .text-muted {
+        color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    &:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+    }
+}

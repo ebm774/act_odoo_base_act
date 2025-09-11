@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="user_info_systray_template" owl="1">
+        <li class="o_user_info_systray" t-if="state.isLoaded">
+            <div class="d-flex align-items-center px-3 py-1 text-white">
+                <i class="fa fa-user me-2"/>
+                <div class="d-flex flex-column text-end">
+                    <span class="fw-bold small" t-esc="state.userName"/>
+                    <span class="text-muted small" t-esc="state.departmentName"/>
+                </div>
+            </div>
+        </li>
+    </t>
+</templates>

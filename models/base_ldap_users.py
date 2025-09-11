@@ -370,8 +370,10 @@ class LDAPUsers(models.AbstractModel):
         added_groups = []
         for group_name in group_names:
             if group_name.endswith('_department'):
+
                 department = self._get_or_create_ldap_department(group_name, category)
                 if department:
+
                     user.department_id = department.id
                     added_groups.append(group_name)
 
@@ -396,8 +398,6 @@ class LDAPUsers(models.AbstractModel):
             # Format: odoo_[department_name]_department
             department = self.env['base_act.department'].create({
                 'name': dept_name})
-
-
 
         return department
 

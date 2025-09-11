@@ -32,6 +32,9 @@
         ],
         'web.assets_backend': [
             'base_act/static/src/scss/navbar.scss',
+            'base_act/static/src/js/user_info_systray.js',
+            'base_act/static/src/xml/user_info_systray.xml',
+            'base_act/static/src/scss/user_info_systray.scss',
         ],
     },
 
@@ -43,9 +46,10 @@
         # Data
         'data/ir_cron.xml',
 
-        # Controller
+        # views
         'views/login_templates.xml',
-        'views/custom_views.xml',
+        'views/custom_systray_views.xml',
+
 
     ],
 
