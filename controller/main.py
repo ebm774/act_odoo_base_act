@@ -98,8 +98,8 @@ class LoginController(Home):
                 _logger.info("db name is : %s", request.db)
 
                 credential = {
-                    'type': 'password',  # required by Odoo
-                    'login': login,  # the user login you found
+                    'type': 'password',
+                    'login': login,
                     'password': temp_password,  # placeholder; won’t be used if you short-circuit
                 }
 

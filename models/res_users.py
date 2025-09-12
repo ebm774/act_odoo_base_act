@@ -146,4 +146,9 @@ class ResUsers(models.Model):
         _logger.debug(f"[DEBUG] Using standard Odoo authentication")
         return super()._check_credentials(password, user_agent_env)
 
+    @property
+    def is_direction_member(self):
+        """Check if user belongs to direction department"""
+        direction_dept = self.env.ref('base_act.department_direction', raise_if_not_found=False)
+        return direction_dept and self.department_id == direction_dept
 

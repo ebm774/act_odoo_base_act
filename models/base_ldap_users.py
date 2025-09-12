@@ -531,8 +531,6 @@ class LDAPUsers(models.AbstractModel):
         if not sam_account:
             return
 
-        login = sam_account[0].decode('utf-8') if isinstance(sam_account[0], bytes) else sam_account[0]
-
         # Validate user should be processed
         should_process, reason = self._should_process_ldap_user(attrs)
 
