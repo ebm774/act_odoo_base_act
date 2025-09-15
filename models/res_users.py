@@ -14,7 +14,21 @@ class ResUsers(models.Model):
 
     tag_auth_token = fields.Char('Tag Auth Token', copy=False)
     tag_auth_expiry = fields.Datetime('Tag Auth Expiry', copy=False)
-    department_id = fields.Many2one('base_act.department', string='Department')
+    department_ids = fields.Many2many('base_act.department', string='Department')
+
+    is_direction_user = fields.Boolean(
+        'Is Direction User',
+        compute='_compute_is_direction_user',
+        store=True
+    )
+
+    @api.depends('department_ids')
+    def _compute_is_direction_user(self):
+        for user in self:
+            user.is_direction_user = any(
+                'direction' in dept.name.lower()
+                for dept in user.department_ids
+            )
 
     @classmethod
     def authenticate(cls, db, credential, user_agent_env):

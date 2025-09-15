@@ -368,23 +368,47 @@ class LDAPUsers(models.AbstractModel):
     def _add_user_to_ldap_groups(self, user, group_names, category):
         """Add user to LDAP groups, creating them if necessary"""
         added_groups = []
+        department_names = []
+
         for group_name in group_names:
             if group_name.endswith('_department'):
-
-                department = self._get_or_create_ldap_department(group_name, category)
-                if department:
-
-                    user.department_id = department.id
-                    added_groups.append(group_name)
-
+                department_names.append(group_name)
             else:
                 group = self._get_or_create_ldap_group(group_name, category)
                 if group:
                     user.groups_id = [(4, group.id)]
                     added_groups.append(group_name)
 
+        # Handle department assignments separately
+        if department_names:
+            self._sync_user_departments(user, department_names, category)
+            added_groups.extend(department_names)
+
         if added_groups:
             _logger.info(f"Added user {user.login} to groups: {', '.join(added_groups)}")
+
+    def _sync_user_departments(self, user, department_names, category):
+        """Sync user department assignments and populate Many2many table"""
+        try:
+            # Clear existing department assignments
+            user.department_ids = [(5, 0, 0)]  # Remove all departments from user
+
+            # Add user to new departments
+            department_ids = []
+            for dept_name in department_names:
+                department = self._get_or_create_ldap_department(dept_name, category)
+                if department:
+                    department_ids.append(department.id)
+                    _logger.info(f"Adding user {user.login} to department: {dept_name}")
+
+            # Assign all departments at once
+            if department_ids:
+                user.department_ids = [(6, 0, department_ids)]
+                _logger.info(f"Assigned user {user.login} to {len(department_ids)} departments")
+
+        except Exception as e:
+            _logger.error(f"Error syncing departments for user {user.login}: {e}")
+            raise
 
     def _get_or_create_ldap_department(self, group_name, category):
         """Get or create LDAP department with intelligent naming"""
