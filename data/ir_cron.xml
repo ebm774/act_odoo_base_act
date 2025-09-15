@@ -9,7 +9,7 @@
             <field name="code">model.cron_sync_ldap_users_with_employee_id()</field>
             <field name="interval_number">1</field>
             <field name="interval_type">hours</field>
-            <field name="active">True</field>
+            <field name="active">False</field>
             <field name="user_id" ref="base.user_root"/>
         </record>
     </data>

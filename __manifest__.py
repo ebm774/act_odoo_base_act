@@ -36,9 +36,6 @@
             'base_act/static/src/xml/user_info_systray.xml',
             'base_act/static/src/scss/user_info_systray.scss',
         ],
-        'web.assets_common': [
-            ('replace', 'web/static/src/img/favicon.ico', 'base_act/static/src/img/favicon.ico'),
-        ],
     },
 
     # always loaded
@@ -52,6 +49,7 @@
         # views
         'views/login_templates.xml',
         'views/custom_systray_views.xml',
+        'views/web_favicon.xml',
 
 
     ],

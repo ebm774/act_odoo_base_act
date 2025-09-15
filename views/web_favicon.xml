@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="custom_favicon" inherit_id="web.layout" name="Custom Favicon">
+
+        <xpath expr="//head/title" position="replace">
+            <title>my autocontrole</title>
+        </xpath>
+
+        <xpath expr="//head" position="inside">
+            <link rel="shortcut icon" href="/base_act/static/description/icon.ico" type="image/x-icon"/>
+            <link rel="icon" href="/base_act/static/description/icon.ico" type="image/x-icon"/>
+            <link rel="apple-touch-icon" href="/base_act/static/description/icon.png"/>
+        </xpath>
+    </template>
+</odoo>
