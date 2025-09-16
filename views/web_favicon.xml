@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <template id="custom_favicon" inherit_id="web.layout" name="Custom Favicon">
-
-        <xpath expr="//head/title" position="replace">
-            <title>my autocontrole</title>
-        </xpath>
-
         <xpath expr="//head" position="inside">
-            <link rel="shortcut icon" href="/base_act/static/description/icon.ico" type="image/x-icon"/>
-            <link rel="icon" href="/base_act/static/description/icon.ico" type="image/x-icon"/>
-            <link rel="apple-touch-icon" href="/base_act/static/description/icon.png"/>
+            <!-- Edge-compatible favicon with cache busting -->
+            <link rel="shortcut icon" href="/base_act/static/description/icon.ico?v=1.0" type="image/x-icon"/>
+            <link rel="icon" href="/base_act/static/description/icon.ico?v=1.0" type="image/x-icon"/>
+
+            <!-- Additional formats for Edge compatibility -->
+            <link rel="icon" href="/base_act/static/description/icon.png?v=1.0" type="image/png" sizes="32x32"/>
+            <link rel="icon" href="/base_act/static/description/icon.png?v=1.0" type="image/png" sizes="16x16"/>
+
+            <!-- Apple touch icon -->
+            <link rel="apple-touch-icon" href="/base_act/static/description/icon.png?v=1.0"/>
+
+            <!-- Edge-specific meta tags -->
+            <meta name="msapplication-TileImage" content="/base_act/static/description/icon.png"/>
+            <meta name="msapplication-TileColor" content="#70B5FF"/>
         </xpath>
     </template>
 </odoo>
