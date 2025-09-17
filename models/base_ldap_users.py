@@ -481,7 +481,15 @@ class LDAPUsers(models.AbstractModel):
             _logger.info("LDAP not enabled, skipping sync")
             return
 
-        # Initialize statistics
+        # STEP 1: Reactivate users moved back from disabled OUs
+        try:
+            _logger.info("Starting user reactivation check...")
+            reactivated_count = self._reactivate_users_moved_from_disabled_ou()
+            _logger.info(f"User reactivation completed: {reactivated_count} users reactivated")
+        except Exception as e:
+            _logger.error(f"Failed to reactivate users: {e}")
+
+        # STEP 2: Normal LDAP sync (now reactivated users will be found as "existing")
         stats = {
             'users_synced': 0,
             'users_created': 0,
@@ -499,6 +507,7 @@ class LDAPUsers(models.AbstractModel):
             # Process each entry
             for entry in ldap_entries:
                 self._process_ldap_entry_for_sync(entry, stats)
+
             self.env.cr.commit()
             self._log_sync_results(stats)
 
@@ -506,7 +515,7 @@ class LDAPUsers(models.AbstractModel):
             _logger.error(f"CRON LDAP sync error: {str(e)}")
             self.env.cr.rollback()
 
-        # After all users and groups are synced, setup module permissions
+        # STEP 3: Module permissions setup
         try:
             _logger.info("Starting LDAP module permissions setup...")
             self._setup_ldap_module_permissions()
@@ -514,6 +523,157 @@ class LDAPUsers(models.AbstractModel):
             _logger.info("LDAP module permissions setup completed")
         except Exception as e:
             _logger.error(f"Failed to setup module permissions during LDAP sync: {e}")
+
+        # STEP 4: Archive users in disabled OUs
+        try:
+            _logger.info("Starting disabled OU user cleanup...")
+            archived_count = self._archive_disabled_ou_users()
+            _logger.info(f"Disabled OU cleanup completed: {archived_count} users archived")
+        except Exception as e:
+            _logger.error(f"Failed to cleanup disabled OU users: {e}")
+
+    def _reactivate_users_moved_from_disabled_ou(self):
+        """Reactivate users who were moved back from disabled OUs and restore their LDAP data"""
+
+        if not self._is_ldap_enabled():
+            return 0
+
+        reactivated_count = 0
+
+        try:
+            # Find all archived LDAP users
+            archived_users = self.env['res.users'].search([
+                ('is_ldap_user', '=', True),
+                ('active', '=', False),
+                ('id', '!=', 1)  # Never touch admin
+            ])
+
+            if not archived_users:
+                _logger.info("No archived LDAP users to check for reactivation")
+                return 0
+
+            _logger.info(
+                f"Checking {len(archived_users)} archived users for reactivation: {archived_users.mapped('login')}")
+
+            # Get current LDAP data
+            ldap_entries = self._get_ldap_users_for_sync()
+
+            # Process each archived user
+            for user in archived_users:
+                # Find user's current LDAP data
+                user_ldap_data = None
+                for entry in ldap_entries:
+                    if not isinstance(entry, tuple) or len(entry) != 2:
+                        continue
+
+                    dn, attrs = entry
+                    if not (attrs and isinstance(attrs, dict)):
+                        continue
+
+                    ldap_login = self._extract_ldap_attribute(attrs, 'sAMAccountName')
+                    if ldap_login == user.login:
+                        user_ldap_data = attrs
+                        break
+
+                if not user_ldap_data:
+                    _logger.debug(f"Archived user {user.login} not found in LDAP - keeping archived")
+                    continue
+
+                # Check if user should be reactivated
+                should_process, reason = self._should_process_ldap_user(user_ldap_data)
+
+                if should_process:
+                    # User is no longer in disabled OU and meets all criteria
+                    try:
+                        _logger.info(f"Reactivating user {user.login} - moved from disabled OU")
+
+                        # Step 1: Reactivate the user
+                        user.action_unarchive()
+
+                        # Step 2: Sync their LDAP data (groups, departments, etc.)
+                        context = self._get_sync_context(for_cron=True)
+                        user.sudo().with_context(**context)._sync_ldap_user(user_ldap_data, user.login)
+
+                        reactivated_count += 1
+                        _logger.info(f"Successfully reactivated and synced user: {user.login}")
+
+                    except Exception as e:
+                        _logger.error(f"Failed to reactivate user {user.login}: {str(e)}")
+                else:
+                    _logger.debug(f"User {user.login} still should not be active: {reason}")
+
+        except Exception as e:
+            _logger.error(f"Error during user reactivation: {str(e)}")
+            raise
+
+        return reactivated_count
+
+    def _archive_disabled_ou_users(self):
+        """Archive Odoo users who are in disabled OUs in LDAP"""
+
+        if not self._is_ldap_enabled():
+            return 0
+
+        archived_count = 0
+
+        try:
+            # Reuse your existing LDAP query method
+            _logger.info("Querying LDAP for all users to check disabled OUs...")
+            ldap_entries = self._get_ldap_users_for_sync()
+
+            if not ldap_entries:
+                _logger.info("No LDAP entries returned")
+                return 0
+
+            # Find users in disabled OUs from the LDAP results
+            disabled_ou_logins = []
+            for entry in ldap_entries:
+                # Handle the same entry format as your existing code
+                if not isinstance(entry, tuple) or len(entry) != 2:
+                    continue
+
+                dn, attrs = entry
+
+                # Skip invalid entries
+                if not (attrs and isinstance(attrs, dict)):
+                    continue
+
+                # Check if user is in disabled OU
+                if self._is_user_in_disabled_ou(attrs):
+                    login = self._extract_ldap_attribute(attrs, 'sAMAccountName')
+                    if login:
+                        disabled_ou_logins.append(login)
+
+            if not disabled_ou_logins:
+                _logger.info("No users found in disabled OUs")
+                return 0
+
+            _logger.info(f"Found {len(disabled_ou_logins)} users in disabled OUs: {disabled_ou_logins}")
+
+            # Find corresponding active Odoo users
+            users_to_archive = self.env['res.users'].search([
+                ('login', 'in', disabled_ou_logins),
+                ('active', '=', True),
+                ('id', '!=', 1)  # Never archive admin
+            ])
+
+            if users_to_archive:
+                _logger.info(
+                    f"Archiving {len(users_to_archive)} users from disabled OUs: {users_to_archive.mapped('login')}")
+
+                # Archive them (this terminates sessions automatically)
+                users_to_archive.action_archive()
+
+                archived_count = len(users_to_archive)
+                _logger.info(f"Successfully archived {archived_count} users from disabled OUs")
+            else:
+                _logger.info("No active Odoo users found matching disabled OU users")
+
+        except Exception as e:
+            _logger.error(f"Error during disabled OU cleanup: {str(e)}")
+            raise
+
+        return archived_count
 
     def _is_ldap_enabled(self):
         """Check if LDAP is enabled"""
