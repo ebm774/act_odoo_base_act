@@ -60,6 +60,7 @@ class LDAPUsers(models.AbstractModel):
             return False
         return employee_id.strip().lower() not in ['<not set>', 'not set', '', 'null']
 
+
     def _should_process_ldap_user(self, attrs):
         """Central validation for whether to process an LDAP user"""
         # Check basic validity

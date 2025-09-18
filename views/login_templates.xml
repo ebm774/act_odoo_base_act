@@ -47,9 +47,10 @@
                         var passwordInput = document.querySelector('input[name="password"]');
                         var tagField = document.querySelector('.field-tag-number');
                         var tagInput = document.getElementById('tag_number');
+                        var loginButtonsDiv = document.querySelector('.oe_login_buttons');
 
                         if (authMethod.value === 'tag') {
-                            // Hide username and password
+
                             if (loginInput) {
                                 var loginGroup = loginInput.closest('.form-group') || loginInput.parentElement;
                                 if (loginGroup) loginGroup.style.display = 'none';
@@ -62,6 +63,9 @@
                             if (tagField) {
                                 tagField.style.display = 'block';
                                 if (tagInput) tagInput.focus();
+                            }
+                            if (loginButtonsDiv) {
+                                loginButtonsDiv.style.setProperty('display', 'none', 'important');
                             }
                         } else {
                             // Show username and password
@@ -76,6 +80,9 @@
                             // Hide tag field
                             if (tagField) {
                                 tagField.style.display = 'none';
+                            }
+                            if (loginButtonsDiv) {
+                                loginButtonsDiv.style.setProperty('display', 'grid', 'important');
                             }
                             if (loginInput) loginInput.focus();
                         }
