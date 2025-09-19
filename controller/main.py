@@ -64,66 +64,68 @@ class LoginController(Home):
 
         return response
 
+    # Replace the _process_tag_login method in controller/main.py
+
     def _process_tag_login(self, login, ldap_attrs, redirect=None):
-        """Process login for tag-authenticated user"""
-        _logger.info("_process_tag_login")
+        """Process login for tag-authenticated user - simplified approach"""
+        _logger.info(f"[TAG-AUTH] Processing tag login for: {login}")
+
         try:
-            # Create or get user
-            users = request.env['res.users'].sudo()
-            user = users.search([('login', '=', login)], limit=1)
-            _logger.info(f"login : {login}")
+            # Step 1: Validate user using service account (no password needed)
+            connector = request.env['base_act.ldap.connector'].sudo()
+            validated_attrs = connector.validate_user_for_tag_auth(login)
 
-            if user :
-                _logger.info("Updating existing user")
-                user._sync_ldap_user(ldap_attrs, login)
-
-                request.env.cr.commit()
-                _logger.info("User sync completed")
-
-                # Generate temporary password and temporarily disable LDAP
-                temp_password = secrets.token_urlsafe(32)
-                _logger.info("Generated temp password")
-
-                user.sudo().write({
-                    'password': temp_password,
-                    'is_ldap_user': False,
-                })
-                _logger.info("Updated user with temp password")
-                request.env.cr.commit()
-                _logger.info("Committed temp password")
-
-
-                # Authenticate normally (server-side API expects positional args)
-                _logger.info("About to call session.authenticate")
-                _logger.info("db name is : %s", request.db)
-
-                credential = {
-                    'type': 'password',
-                    'login': login,
-                    'password': temp_password,  # placeholder; won’t be used if you short-circuit
-                }
-
-                uid = request.session.authenticate(request.db, credential)
-                _logger.info(f"Authentication returned: {uid}")
-
-                if uid:
-                    _logger.info("Authentication successful via temp password")
-                    # Re-enable LDAP and clear password
-                    user.sudo().write({
-                        'password': '',
-                        'is_ldap_user': True,
-                    })
-                    request.env.cr.commit()
-                    _logger.info("Restored user settings")
-
-                    return request.redirect(redirect or '/web')
-            else:
-                error_message = "You tag does not give you access to this software, please contact your system administrator."
+            if not validated_attrs:
+                error_message = "Your tag access has been disabled or your account is inactive. Please contact your system administrator."
                 return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
 
+            # Step 2: Create or sync user (using service account validation)
+            users = request.env['res.users'].sudo()
+            user = users.search([('login', '=', login)], limit=1)
+
+            if user:
+                _logger.info(f"[TAG-AUTH] Updating existing user: {login}")
+                user._sync_ldap_user(validated_attrs, login)
+            else:
+                _logger.info(f"[TAG-AUTH] Creating new user: {login}")
+                user = users._sync_ldap_user(validated_attrs, login)
+
+            request.env.cr.commit()
+
+            if not user:
+                error_message = "Failed to create user account. Please contact your system administrator."
+                return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
+
+            # Step 3: Create authenticated session directly (certificate-like auth)
+            # This is the key difference - we create the session without password validation
+            user_id = user.id if hasattr(user, 'id') else user
+
+            try:
+                credential = {
+                    'type': 'tag_authenticated',
+                    'login': login,
+                    'uid': user_id,
+                    'tag_validated': True  # This tells authenticate() it's pre-validated
+                }
+
+                # This will call our modified authenticate() method
+                session_uid = request.session.authenticate(request.db, credential)
+
+                if session_uid:
+                    _logger.info(f"[TAG-AUTH] Session created successfully for: {login} (uid: {session_uid})")
+                    return request.redirect(redirect or '/web')
+                else:
+                    _logger.error(f"[TAG-AUTH] Session creation failed for: {login}")
+                    error_message = "Failed to create session. Please contact support."
+                    return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
+
+            except Exception as session_error:
+                _logger.error(f"[TAG-AUTH] Session authentication error: {session_error}")
+                error_message = "Session creation failed. Please contact support."
+                return request.redirect(f'/web/login?error={error_message}&auth_method=tag')
 
         except Exception as e:
+            _logger.error(f"[TAG-AUTH] Authentication failed: {e}")
             request.env.cr.rollback()
-            values = request.params.copy()
-            values['error'] = _("Authentication failed: Unable to create or access user account")
-            return request.render('web.login', values)
+            error_message = "Authentication system error. Please try again or contact support."
+            return request.redirect(f'/web/login?error={error_message}&auth_method=tag')

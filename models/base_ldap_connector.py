@@ -286,3 +286,92 @@ class LDAPConnector(models.AbstractModel):
                     odoo_groups.append(group_name)
 
         return odoo_groups
+
+    # Add this method to your existing models/base_ldap_connector.py
+
+    @api.model
+    def validate_user_for_tag_auth(self, login):
+        """
+        Validate user for tag-based authentication using service account.
+        This is like certificate validation - we verify the user exists, is active,
+        and has proper permissions without requiring their password.
+
+        Returns:
+            - dict with user attributes if valid
+            - False if invalid/inactive
+        """
+        _logger.info(f"[TAG-AUTH] Validating user for tag authentication: {login}")
+
+        config = self.get_ldap_config()
+
+        # Use service account to validate user (we already have connection with service account)
+        with self.ldap_connection() as conn:
+            search_filter = f"(&(objectClass=user)(sAMAccountName={ldap.filter.escape_filter_chars(login)}))"
+
+            result = conn.search_s(
+                config['base_dn'],
+                ldap.SCOPE_SUBTREE,
+                search_filter,
+                ['sAMAccountName', 'displayName', 'mail', 'memberOf', 'userPrincipalName',
+                 'employeeID', 'EmployeeNumber', 'userAccountControl']
+            )
+
+            # Find actual user data (filter out referrals)
+            for entry in result:
+                if isinstance(entry, tuple) and len(entry) == 2:
+                    dn, attrs = entry
+                    if attrs and isinstance(attrs, dict) and 'sAMAccountName' in attrs:
+
+                        # Check if account is active (not disabled)
+                        if not self._is_user_account_active(attrs):
+                            _logger.warning(f"[TAG-AUTH] User account is disabled: {login}")
+                            return False
+
+                        # Check if user is in disabled OU
+                        if self._is_user_in_disabled_ou(dn):
+                            _logger.warning(f"[TAG-AUTH] User is in disabled OU: {login}")
+                            return False
+
+                        # Check if user has required group membership (odoo group)
+                        if not self._user_has_odoo_access(attrs.get('memberOf', [])):
+                            _logger.warning(f"[TAG-AUTH] User lacks required group membership: {login}")
+                            return False
+
+                        _logger.info(f"[TAG-AUTH] User validation successful: {login}")
+                        return attrs
+
+        _logger.warning(f"[TAG-AUTH] User not found: {login}")
+        return False
+
+    @api.model
+    def _is_user_account_active(self, attrs):
+        """Check if user account is active (not disabled)"""
+        user_account_control = attrs.get('userAccountControl', [b'0'])[0]
+        if isinstance(user_account_control, bytes):
+            user_account_control = user_account_control.decode('utf-8')
+
+        uac_value = int(user_account_control)
+        # Check if ACCOUNTDISABLE bit (0x2) is set
+        is_disabled = bool(uac_value & 0x2)
+        return not is_disabled
+
+    @api.model
+    def _is_user_in_disabled_ou(self, dn):
+        """Check if user is in a disabled OU - reuse your existing logic"""
+        disabled_ou_patterns = [
+            'OU=DISABLED_AFTER_SEPTEMBER_2025',
+            'OU=DISABLED_BEFORE_SEPTEMBER_2025'
+        ]
+        return any(pattern in dn for pattern in disabled_ou_patterns)
+
+    @api.model
+    def _user_has_odoo_access(self, member_of_list):
+        """Check if user has required odoo group membership - reuse your existing logic"""
+        required_group = 'CN=odoo,CN=Builtin,DC=autocontrole,DC=be'
+
+        for group_dn in member_of_list:
+            if isinstance(group_dn, bytes):
+                group_dn = group_dn.decode('utf-8')
+            if group_dn == required_group:
+                return True
+        return False
