@@ -24,6 +24,8 @@ class ResUsers(models.Model):
 
     @api.depends('department_ids')
     def _compute_is_direction_user(self):
+        if not self:
+            return
         for user in self:
             user.is_direction_user = any(
                 'direction' in dept.name.lower()

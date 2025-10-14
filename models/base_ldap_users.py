@@ -150,11 +150,11 @@ class LDAPUsers(models.AbstractModel):
         # First try by worker_id if available
         if worker_id and str(worker_id).isdigit():
             worker_id_int = int(worker_id)
-            user = self.search([('worker_id', '=', worker_id_int)], limit=1)
+            user =  self.env['res.users'].search([('worker_id', '=', worker_id_int)], limit=1)
 
         # Fallback to login if not found
         if not user:
-            user = self.search([('login', '=', login)], limit=1)
+            user =  self.env['res.users'].search([('login', '=', login)], limit=1)
 
         return user
 
@@ -206,13 +206,15 @@ class LDAPUsers(models.AbstractModel):
         """Create new LDAP user"""
         _logger.info(f"Creating new user for {user_vals['login']}")
 
-        # Add default group for new users
         user_vals['groups_id'] = [(6, 0, [self.env.ref('base.group_user').id])]
 
         try:
             context = self._get_sync_context(for_cron=False)
-            user = self.sudo().with_context(**context).create(user_vals)
+            # user = self.env['res.users'].sudo().with_context(**context).create(user_vals)
+            super_env = self.env(user=SUPERUSER_ID)
+            user = super_env['res.users'].with_context(**context).create(user_vals)
             _logger.info(f"Created new LDAP user: {user_vals['login']} with ID: {user.id}")
+            user = self.env['res.users'].browse(user.id)
 
             self._sync_user_groups(user, member_of)
             return user.id
@@ -331,18 +333,21 @@ class LDAPUsers(models.AbstractModel):
         """Sync user groups from LDAP with automatic group creation"""
         _logger.debug(f"Syncing groups for user: {user.login}")
 
+        super_env = self.env(user=SUPERUSER_ID)
+        user_super = super_env['res.users'].browse(user.id)
+
         # Get or create group category for LDAP groups
         category = self._get_or_create_ldap_category()
 
         # Get LDAP groups starting with odoo_
-        connector = self.env['base_act.ldap.connector']
+        connector = super_env['base_act.ldap.connector']
         odoo_group_names = connector.get_odoo_groups_from_ldap(member_of_list)
 
         # Remove user from all LDAP-managed groups first
-        self._remove_user_from_ldap_groups(user, category)
+        self._remove_user_from_ldap_groups(user_super, category)
 
         # Add user to current LDAP groups
-        self._add_user_to_ldap_groups(user, odoo_group_names, category)
+        self._add_user_to_ldap_groups(user_super, odoo_group_names, category)
 
     def _get_or_create_ldap_category(self):
         """Get or create LDAP group category"""
@@ -359,7 +364,8 @@ class LDAPUsers(models.AbstractModel):
 
     def _remove_user_from_ldap_groups(self, user, category):
         """Remove user from all LDAP-managed groups"""
-        ldap_groups = self.env['res.groups'].search([
+        super_env = self.env(user=SUPERUSER_ID)
+        ldap_groups = super_env['res.groups'].search([
             ('category_id', '=', category.id)
         ])
         for group in ldap_groups:
@@ -377,7 +383,7 @@ class LDAPUsers(models.AbstractModel):
             else:
                 group = self._get_or_create_ldap_group(group_name, category)
                 if group:
-                    user.groups_id = [(4, group.id)]
+                    user.write({'groups_id': [(4, group.id)]})
                     added_groups.append(group_name)
 
         # Handle department assignments separately
@@ -392,7 +398,7 @@ class LDAPUsers(models.AbstractModel):
         """Sync user department assignments and populate Many2many table"""
         try:
             # Clear existing department assignments
-            user.department_ids = [(5, 0, 0)]  # Remove all departments from user
+            user.write({'department_ids': [(5, 0, 0)]})  # Remove all departments from user
 
             # Add user to new departments
             department_ids = []
@@ -404,7 +410,7 @@ class LDAPUsers(models.AbstractModel):
 
             # Assign all departments at once
             if department_ids:
-                user.department_ids = [(6, 0, department_ids)]
+                user.write({'department_ids': [(6, 0, department_ids)]})
                 _logger.info(f"Assigned user {user.login} to {len(department_ids)} departments")
 
         except Exception as e:
