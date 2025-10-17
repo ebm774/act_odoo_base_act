@@ -83,6 +83,8 @@ class LoginController(Home):
             users = request.env['res.users'].sudo()
             user = users.search([('login', '=', login)], limit=1)
 
+            is_new_user = not user
+
             if user:
                 _logger.info(f"[TAG-AUTH] Updating existing user: {login}")
                 user._sync_ldap_user(validated_attrs, login)
@@ -90,7 +92,25 @@ class LoginController(Home):
                 _logger.info(f"[TAG-AUTH] Creating new user: {login}")
                 user = users._sync_ldap_user(validated_attrs, login)
 
+
             request.env.cr.commit()
+
+            if is_new_user:
+                try:
+                    _logger.info(f"[TAG-AUTH] Setting up permissions for new user: {login}")
+                    ldap_users = request.env['base_act.ldap.users'].sudo()
+
+                    ldap_users._setup_ldap_module_permissions()
+                    request.env['ldap.permission.manager'].sudo().setup_cross_module_permissions()
+
+                    request.env.cr.commit()
+                    _logger.info(f"[TAG-AUTH] Permissions setup completed for user: {login}")
+
+                except Exception as perm_error:
+                    # Don't block login, but log the error
+                    # The CRON job will fix permissions later if this fails
+                    _logger.error(f"[TAG-AUTH] Failed to setup permissions for user {login}: {perm_error}")
+
 
             if not user:
                 error_message = "Failed to create user account. Please contact your system administrator."
